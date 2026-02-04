@@ -1,0 +1,75 @@
+# Issue Tracker 配置文件示例
+#
+# 使用方法:
+#   1. 复制此文件为 config.yaml
+#   2. 根据项目需求修改配置
+
+project:
+  # 项目名称
+  name: "Your Project Name"
+
+  # 数据库路径 (相对于 git 仓库根目录)
+  db_path: "docs/project/issues.db"
+
+# 编号规则定义
+id_rules:
+  # 编号格式模板: {prefix} = 前缀, {num} = 序号
+  format: "{prefix}-{num:03d}"
+
+  # 前缀 → 优先级/标签 映射
+  prefixes:
+    C: { priority: P0, label: "Critical" }
+    H: { priority: P1, label: "High" }
+    M: { priority: P2, label: "Medium" }
+    L: { priority: P3, label: "Low" }
+    A: { priority: P2, label: "Architecture" }
+    T: { priority: P3, label: "Test" }
+
+# 优先级列表（有序，高→低）
+priorities: [P0, P1, P2, P3]
+
+# 状态列表
+statuses: [pending, in_progress, planned, fixed, n_a]
+
+# GitHub 集成配置
+github:
+  # 是否启用 GitHub 同步
+  enabled: true
+
+  # 是否在修复后自动关闭 Issue
+  close_on_fix: true
+
+  # 关闭时的评论模板
+  comment_template: "自动同步: {issue_id} 已修复"
+
+# 导出配置
+export:
+  # 默认输出路径
+  output: "docs/project/all-issues.md"
+
+# ==================== WeldSmart Pro 特定配置示例 ====================
+
+# project:
+#   name: "WeldSmart Pro"
+#   db_path: "docs/project/issues.db"
+#
+# id_rules:
+#   format: "{prefix}-{num:03d}"
+#   prefixes:
+#     C: { priority: P0, label: "Critical" }
+#     H: { priority: P1, label: "High" }
+#     M: { priority: P2, label: "Medium" }
+#     L: { priority: P3, label: "Low" }
+#     A: { priority: P2, label: "Architecture" }
+#     T: { priority: P3, label: "Test" }
+#
+# priorities: [P0, P1, P2, P3]
+# statuses: [pending, in_progress, planned, fixed, n_a]
+#
+# github:
+#   enabled: true
+#   close_on_fix: true
+#   comment_template: "自动同步: {issue_id} 已修复"
+#
+# export:
+#   output: "docs/project/all-issues.md"
