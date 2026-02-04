@@ -49,10 +49,44 @@ except ImportError:
 
 # ── 全局常量 ─────────────────────────────────────────────────────────────────
 
-DEFAULT_CONFIG = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "config.yaml"
-)
+def _find_default_config() -> str:
+    """查找默认配置文件.
+
+    查找优先级:
+    1. 当前目录的 config.yaml
+    2. git root 目录的 config.yaml
+    3. 包安装目录的 config.yaml (pip install 模式)
+
+    Returns:
+        找到的配置文件路径，如果都不存在则返回包安装目录的 config.yaml 路径
+    """
+    import subprocess
+
+    # 1. 当前目录
+    current_config = os.path.join(os.getcwd(), "config.yaml")
+    if os.path.isfile(current_config):
+        return current_config
+
+    # 2. git root 目录
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=True,
+        )
+        git_root = result.stdout.strip()
+        git_config = os.path.join(git_root, "config.yaml")
+        if os.path.isfile(git_config):
+            return git_config
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # 3. 包安装目录（回退到原有逻辑）
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "config.yaml"
+    )
+
+DEFAULT_CONFIG = _find_default_config()
 
 
 def _find_git_root() -> str:
