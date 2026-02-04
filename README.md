@@ -26,12 +26,12 @@ pip install issue-tracker-cli
 
 **使用 HTTPS**（推荐）：
 ```bash
-pip install git+https://github.com/lbwds/issue-tracker-cli.git@v2.0.0
+pip install git+https://github.com/lbwds/issue-tracker-cli.git@v2.0.1
 ```
 
 **使用 SSH**（已配置 SSH 密钥）：
 ```bash
-pip install git+ssh://git@github.com/lbwds/issue-tracker-cli.git@v2.0.0
+pip install git+ssh://git@github.com/lbwds/issue-tracker-cli.git@v2.0.1
 ```
 
 ### 开发模式安装
@@ -40,6 +40,27 @@ pip install git+ssh://git@github.com/lbwds/issue-tracker-cli.git@v2.0.0
 git clone https://github.com/lbwds/issue-tracker-cli.git
 cd issue-tracker-cli
 pip install -e .
+```
+
+### 安装后的目录结构
+
+首次运行任何命令时，工具会自动创建数据存储目录：
+
+```bash
+issue-tracker --help  # 触发目录创建
+```
+
+创建的目录结构：
+```
+~/issue-tracker-cli/          # ISSUE_TRACKER_HOME
+├── .config/                  # 项目配置文件目录
+├── data/                     # SQLite 数据库目录
+└── exports/                  # Markdown 导出目录
+```
+
+可通过环境变量自定义位置：
+```bash
+export ISSUE_TRACKER_HOME=/custom/path
 ```
 
 ## 快速开始
