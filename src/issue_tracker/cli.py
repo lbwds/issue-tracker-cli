@@ -59,6 +59,25 @@ def _get_tracker_home() -> str:
     return os.environ.get("ISSUE_TRACKER_HOME", os.path.expanduser("~/issue-tracker-cli"))
 
 
+def ensure_directories() -> None:
+    """确保必要的目录存在.
+
+    创建 ISSUE_TRACKER_HOME 及其子目录:
+    - .config/  : 项目配置文件目录
+    - data/     : 数据库文件目录
+    - exports/  : 导出文件目录
+    """
+    home = _get_tracker_home()
+    dirs = [
+        home,
+        os.path.join(home, ".config"),
+        os.path.join(home, "data"),
+        os.path.join(home, "exports"),
+    ]
+    for d in dirs:
+        os.makedirs(d, exist_ok=True)
+
+
 def _sanitize_name(name: str) -> str:
     """清理名称用于文件名: 保留字母数字和下划线，其余替换为下划线."""
     import re
@@ -73,11 +92,6 @@ def _find_project_config(project_id: str) -> str:
     import glob as glob_mod
 
     config_dir = os.path.join(_get_tracker_home(), ".config")
-    if not os.path.isdir(config_dir):
-        raise FileNotFoundError(
-            f"配置目录不存在: {config_dir}\n"
-            f"请先创建该目录并放置项目配置文件 (如 {project_id}_ProjectName.yaml)"
-        )
 
     pattern = os.path.join(config_dir, f"{project_id}_*.yaml")
     matches = glob_mod.glob(pattern)
@@ -87,7 +101,8 @@ def _find_project_config(project_id: str) -> str:
         raise FileNotFoundError(
             f"未找到项目 '{project_id}' 的配置文件\n"
             f"搜索路径: {config_dir}\n"
-            f"可用项目: {available}"
+            f"可用项目: {available}\n"
+            f"\n提示: 在项目目录创建 config.yaml，或在 {config_dir} 创建 {project_id}_ProjectName.yaml"
         )
     if len(matches) > 1:
         raise ValueError(
@@ -664,6 +679,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main():
+    # 确保必要的目录存在
+    ensure_directories()
+
     parser = build_parser()
     args = parser.parse_args()
 
