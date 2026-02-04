@@ -24,22 +24,20 @@ pip install issue-tracker-cli
 
 ### 从 GitHub 安装
 
-**使用 SSH**（推荐，已配置 SSH 密钥）：
+**使用 HTTPS**（推荐）：
 ```bash
-pip install git+ssh://git@github.com/lbwds/issue-tracker-cli.git@v1.2.2
+pip install git+https://github.com/lbwds/issue-tracker-cli.git@v2.0.0
 ```
 
-**使用 HTTPS + Personal Access Token**：
+**使用 SSH**（已配置 SSH 密钥）：
 ```bash
-# 1. 生成 Token: GitHub Settings → Developer settings → Personal access tokens
-# 2. 使用 Token 安装
-pip install git+https://YOUR_TOKEN@github.com/lbwds/issue-tracker-cli.git@v1.2.2
+pip install git+ssh://git@github.com/lbwds/issue-tracker-cli.git@v2.0.0
 ```
 
 ### 开发模式安装
 
 ```bash
-git clone git@github.com:lbwds/issue-tracker-cli.git
+git clone https://github.com/lbwds/issue-tracker-cli.git
 cd issue-tracker-cli
 pip install -e .
 ```
