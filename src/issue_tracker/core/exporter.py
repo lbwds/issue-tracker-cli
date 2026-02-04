@@ -1,6 +1,6 @@
 """Export 逻辑: 从数据库生成 markdown 文件."""
 
-from datetime import date
+from datetime import datetime
 
 from .config import Config
 from .database import Database
@@ -102,14 +102,14 @@ class Exporter:
     # ── 各段生成 ─────────────────────────────────────────────────────────────
 
     def _header(self, stats: dict) -> str:
-        today = date.today().isoformat()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
         total = stats["total"]
         fixed = stats["by_status"].get("fixed", 0)
         pending_count = total - fixed - stats["by_status"].get("n_a", 0)
         lines = [
             "# WeldSmart Pro 全阶段问题清单汇总",
             "",
-            f"> 生成日期: {today}",
+            f"> 生成时间: {now}",
             f"> 总条目数: {total} | 已修复: {fixed} | 待处理: {pending_count}",
             f"> 文档版本: 全阶段完整版（由 issue-tracker 工具自动生成）",
             "",
@@ -341,12 +341,12 @@ class Exporter:
         return "\n".join(lines)
 
     def _footer(self) -> str:
-        today = date.today().isoformat()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
         return "\n".join([
             "---",
             "",
             f"**文档维护者**: issue-tracker 自动生成",
-            f"**生成日期**: {today}",
+            f"**生成时间**: {now}",
             "",
         ])
 
