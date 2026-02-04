@@ -446,6 +446,47 @@ def _parse_int(val) -> int | None:
         return None
 
 
+def _format_relative_date(date_str: str | None) -> str:
+    """将日期格式化为相对时间（今天/昨天/N天前）或具体日期.
+
+    Args:
+        date_str: 日期字符串 (YYYY-MM-DD)
+
+    Returns:
+        相对时间描述或具体日期
+    """
+    if not date_str:
+        return ""
+
+    from datetime import date, timedelta
+
+    try:
+        target_date = date.fromisoformat(date_str)
+    except ValueError:
+        return date_str
+
+    today = date.today()
+    delta = today - target_date
+
+    if delta.days == 0:
+        return "今天"
+    elif delta.days == 1:
+        return "昨天"
+    elif delta.days == -1:
+        return "明天"
+    elif delta.days == 2:
+        return "2天前"
+    elif delta.days == -2:
+        return "2天后"
+    elif delta.days == 3:
+        return "3天前"
+    elif delta.days == -3:
+        return "3天后"
+    else:
+        # 超过3天显示具体日期
+        return date_str
+
+
 def _print_issue_table(issues):
     """打印问题概要表格."""
     STATUS_LABEL = {
@@ -467,7 +508,8 @@ def _print_issue_table(issues):
     for i in issues:
         title = i.title if len(i.title) <= title_w else i.title[: title_w - 2] + ".."
         status = STATUS_LABEL.get(i.status, i.status)
-        print(fmt.format(i.id, title, i.priority, i.discovery_date, status))
+        discovery_display = _format_relative_date(i.discovery_date) or i.discovery_date
+        print(fmt.format(i.id, title, i.priority, discovery_display, status))
 
 
 def _print_issue_detail(issue):
@@ -480,9 +522,11 @@ def _print_issue_detail(issue):
         "n_a": "⚠️ 不适用",
     }
     print(f"\n  [{issue.id}] {issue.title}")
-    print(f"  优先级: {issue.priority}  |  状态: {STATUS_LABEL.get(issue.status, issue.status)}  |  发现日期: {issue.discovery_date}")
+    discovery_display = _format_relative_date(issue.discovery_date) or issue.discovery_date
+    print(f"  优先级: {issue.priority}  |  状态: {STATUS_LABEL.get(issue.status, issue.status)}  |  发现日期: {discovery_display}")
     if issue.fix_date:
-        print(f"  修复日期: {issue.fix_date}")
+        fix_display = _format_relative_date(issue.fix_date) or issue.fix_date
+        print(f"  修复日期: {fix_display}")
     if issue.file_path:
         print(f"  文件: {issue.file_path}")
     if issue.location:
