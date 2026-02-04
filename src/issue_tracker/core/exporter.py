@@ -1,5 +1,6 @@
 """Export 逻辑: 从数据库生成 markdown 文件."""
 
+import os
 from datetime import datetime
 
 from .config import Config
@@ -16,15 +17,20 @@ STATUS_EMOJI = {
     "n_a": "⚠️ 不适用",
 }
 
-# 优先级排序权重（数值越小排越前）
-PRIORITY_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
-
-# 优先级分组标题模板
+# 优先级分组标题
 PRIORITY_SECTION_TITLES = {
-    "P0": "Critical Priority (P0 - 紧急，影响硬实时性能)",
-    "P1": "High Priority (P1 - 高，严重影响代码质量和安全性)",
-    "P2": "Medium Priority (P2 - 中，影响代码可维护性和健壮性)",
-    "P3": "Low Priority (P3 - 低，代码风格和最佳实践)",
+    "P0": "Critical Priority (P0)",
+    "P1": "High Priority (P1)",
+    "P2": "Medium Priority (P2)",
+    "P3": "Low Priority (P3)",
+}
+
+# 优先级说明
+PRIORITY_LABELS = {
+    "P0": "紧急 - 影响核心功能正常运行",
+    "P1": "高 - 严重影响代码质量和安全性",
+    "P2": "中 - 影响代码可维护性和健壮性",
+    "P3": "低 - 代码风格和最佳实践",
 }
 
 
@@ -46,6 +52,11 @@ class Exporter:
         """
         if output_path is None:
             output_path = self._config.export_output
+
+        # 确保目录存在
+        dir_name = os.path.dirname(output_path)
+        if dir_name:
+            os.makedirs(dir_name, exist_ok=True)
 
         content = self._generate()
 
@@ -74,19 +85,10 @@ class Exporter:
         sections.append(self._statistics(all_issues, stats))
 
         # 按优先级分组的详细条目
-        # 先按优先级分组，特殊处理 Architecture(A-) 和 Test(T-)
         grouped = self._group_issues(all_issues)
         for priority in ["P0", "P1", "P2", "P3"]:
             if priority in grouped and grouped[priority]:
                 sections.append(self._priority_section(priority, grouped[priority]))
-
-        # Architecture 条目单独一节
-        if "Architecture" in grouped and grouped["Architecture"]:
-            sections.append(self._architecture_section(grouped["Architecture"]))
-
-        # Test 条目单独一节
-        if "Test" in grouped and grouped["Test"]:
-            sections.append(self._test_section(grouped["Test"]))
 
         # 待修复问题优先级排序
         sections.append(self._pending_priority_list(all_issues))
@@ -107,7 +109,7 @@ class Exporter:
         fixed = stats["by_status"].get("fixed", 0)
         pending_count = total - fixed - stats["by_status"].get("n_a", 0)
         lines = [
-            "# WeldSmart Pro 全阶段问题清单汇总",
+            f"# {self._config.project_name} 问题清单汇总",
             "",
             f"> 生成时间: {now}",
             f"> 总条目数: {total} | 已修复: {fixed} | 待处理: {pending_count}",
@@ -128,12 +130,10 @@ class Exporter:
             "- [总体统计](#总体统计)",
             "  - [按优先级统计](#按优先级统计)",
             "  - [问题概要汇总](#问题概要汇总)",
-            "- [Critical Priority (P0 - 紧急，影响硬实时性能)](#critical-priority-p0---紧急影响硬实时性能)",
-            "- [High Priority (P1 - 高，严重影响代码质量和安全性)](#high-priority-p1---高严重影响代码质量和安全性)",
-            "- [Medium Priority (P2 - 中，影响代码可维护性和健壮性)](#medium-priority-p2---中影响代码可维护性和健壮性)",
-            "- [Low Priority (P3 - 低，代码风格和最佳实践)](#low-priority-p3---低代码风格和最佳实践)",
-            "- [Architecture Issues (架构设计问题)](#architecture-issues-架构设计问题)",
-            "- [Test Issues (测试稳定性问题)](#test-issues-测试稳定性问题)",
+            "- [Critical Priority (P0)](#critical-priority-p0)",
+            "- [High Priority (P1)](#high-priority-p1)",
+            "- [Medium Priority (P2)](#medium-priority-p2)",
+            "- [Low Priority (P3)](#low-priority-p3)",
             "- [待修复问题优先级排序](#待修复问题优先级排序)",
             "- [附录：问题分类统计](#附录问题分类统计)",
             "",
@@ -148,17 +148,20 @@ class Exporter:
             "",
             "### 问题编号规则",
             "",
-            "| 前缀 | 优先级 | 说明 |",
-            "|------|--------|------|",
+            "编号为全局自动递增序号（如 001, 002, 003...），由工具在新增或迁移时自动分配。",
+            "",
+            "| 优先级 | 含义 |",
+            "|--------|------|",
         ]
-        for prefix, info in self._config.prefixes.items():
-            lines.append(f"| {prefix}-xxx | {info['priority']} ({info['label']}) | {info['label']} |")
+        for p in self._config.valid_priorities:
+            label = PRIORITY_LABELS.get(p, p)
+            lines.append(f"| {p} | {label} |")
         lines.extend([
             "",
             "### 问题条目格式",
             "",
             "```markdown",
-            "### X-xxx: 问题标题 - ❌ 待修复/✅ 已修复",
+            "### 001: 问题标题 - ❌ 待修复/✅ 已修复",
             "**发现日期**: YYYY-MM-DD",
             "**文件**: `文件路径`",
             "**位置**: 行号或代码位置",
@@ -194,14 +197,11 @@ class Exporter:
         # 按优先级分组统计
         grouped = self._group_issues(all_issues)
 
-        # 显示顺序: P0, P1, P2, P3, Architecture, Test
         display_order = [
             ("Critical (P0)", "P0"),
             ("High     (P1)", "P1"),
             ("Medium   (P2)", "P2"),
             ("Low      (P3)", "P3"),
-            ("Architecture (A)", "Architecture"),
-            ("Test     (T)", "Test"),
         ]
 
         grand_total = 0
@@ -258,27 +258,6 @@ class Exporter:
 
         return "\n".join(lines)
 
-    def _architecture_section(self, issues: list[Issue]) -> str:
-        lines = ["## Architecture Issues (架构设计问题)", ""]
-        for issue in sorted(issues, key=lambda i: self._sort_key(i.id)):
-            lines.append(self._format_issue(issue))
-            lines.append("---")
-            lines.append("")
-        return "\n".join(lines)
-
-    def _test_section(self, issues: list[Issue]) -> str:
-        lines = [
-            "## Test Issues (测试稳定性问题)",
-            "",
-            "> 以下问题为测试运行中发现的不稳定（flaky）测试。这些测试单独执行时全部通过，仅在完整测试套件压力下概率性失败。根因均为测试基础设施级别的资源竞争，非业务逻辑缺陷。",
-            "",
-        ]
-        for issue in sorted(issues, key=lambda i: self._sort_key(i.id)):
-            lines.append(self._format_issue(issue))
-            lines.append("---")
-            lines.append("")
-        return "\n".join(lines)
-
     def _pending_priority_list(self, all_issues: list[Issue]) -> str:
         """待修复问题优先级排序章节."""
         pending = [i for i in all_issues if i.status in ("pending", "in_progress", "planned")]
@@ -290,8 +269,7 @@ class Exporter:
         # 按优先级分组
         prio_groups = {}
         for issue in pending:
-            p = issue.priority
-            prio_groups.setdefault(p, []).append(issue)
+            prio_groups.setdefault(issue.priority, []).append(issue)
 
         for p in ["P0", "P1", "P2", "P3"]:
             if p not in prio_groups:
@@ -300,10 +278,10 @@ class Exporter:
             label_map = {"P0": "紧急 (P0)", "P1": "高 (P1)", "P2": "中 (P2)", "P3": "低 (P3)"}
             lines.append(f"### {label_map[p]}")
             total_hours = sum(i.estimated_hours or 0 for i in group)
-            for issue in sorted(group, key=lambda i: self._sort_key(i.id)):
+            for idx, issue in enumerate(sorted(group, key=lambda i: self._sort_key(i.id)), 1):
                 status_emoji = STATUS_EMOJI.get(issue.status, issue.status)
                 hours_str = f" ({issue.estimated_hours}h)" if issue.estimated_hours else ""
-                lines.append(f"{_list_index(issue, group)}. **{issue.id}**: {issue.title}{hours_str} {status_emoji}")
+                lines.append(f"{idx}. **{issue.id}**: {issue.title}{hours_str} {status_emoji}")
             lines.append(f"\n**预计工时**: {total_hours} 小时")
             lines.append("")
 
@@ -412,28 +390,19 @@ class Exporter:
     # ── 辅助 ─────────────────────────────────────────────────────────────────
 
     def _group_issues(self, issues: list[Issue]) -> dict[str, list[Issue]]:
-        """按分组键归类 Issue.
-
-        A- 前缀 → Architecture, T- 前缀 → Test, 其余按 priority 分组。
-        """
+        """按优先级归类 Issue."""
         groups: dict[str, list[Issue]] = {}
         for issue in issues:
-            prefix = issue.id.split("-")[0] if "-" in issue.id else ""
-            if prefix == "A":
-                groups.setdefault("Architecture", []).append(issue)
-            elif prefix == "T":
-                groups.setdefault("Test", []).append(issue)
-            else:
-                groups.setdefault(issue.priority, []).append(issue)
+            groups.setdefault(issue.priority, []).append(issue)
         return groups
 
     @staticmethod
-    def _sort_key(issue_id: str) -> tuple[str, int]:
-        """编号排序键: (前缀字母, 数字部分)."""
-        parts = issue_id.split("-", 1)
-        if len(parts) == 2 and parts[1].isdigit():
-            return (parts[0], int(parts[1]))
-        return (issue_id, 0)
+    def _sort_key(issue_id: str) -> int:
+        """编号排序键: 按数字值排序."""
+        try:
+            return int(issue_id)
+        except ValueError:
+            return 0
 
 
 # ── 模块级辅助函数 ───────────────────────────────────────────────────────────
@@ -444,11 +413,3 @@ def _format_hours(hours: float) -> str:
     if hours == int(hours):
         return f"{int(hours)} 小时"
     return f"{hours} 小时"
-
-
-def _list_index(issue: Issue, group: list[Issue]) -> int:
-    """返回 issue 在 group 中的 1-based 索引."""
-    try:
-        return group.index(issue) + 1
-    except ValueError:
-        return 0

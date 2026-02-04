@@ -1,14 +1,49 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+本文件提供 Claude Code (claude.ai/code) 在此仓库中工作时所需的指导。
 
 ## 项目概述
 
-**Issue Tracker CLI** 是一个通用的 Issue 追踪命令行工具，支持 SQLite 本地存储和 Markdown 导出。设计目标是通用性 - 换项目只需替换 `config.yaml` 和对应的 migrator 插件即可复用。
+**Issue Tracker CLI** 是一个通用的 Issue 追踪命令行工具，支持 SQLite 本地存储和 Markdown 导出。
 
 - **语言**: Python 3.10+
 - **数据库**: SQLite3 (内置)
 - **外部依赖**: 仅 PyYAML + `gh` CLI (GitHub 同步可选)
+
+---
+
+## 架构特性
+
+### 多项目支持
+
+工具支持多项目独立运行，通过 `-p project_id` 切换项目：
+
+```bash
+# 切换到项目 001
+issue-tracker -p 001 stats
+
+# 切换到项目 002
+issue-tracker -p 002 query --status pending
+```
+
+### 目录结构
+
+```
+~/issue-tracker-cli/              # ISSUE_TRACKER_HOME
+├── .config/                      # 项目配置目录
+│   ├── 001_WeldSmart.yaml        # 项目 001 配置
+│   └── 002_AnotherProject.yaml   # 项目 002 配置
+└── data/                         # 数据库目录
+    ├── 001_WeldSmart_Pro.db      # 项目 001 数据库
+    └── 002_Another_Project.db    # 项目 002 数据库
+```
+
+### 编号规则
+
+**全局自动递增序号**：编号为纯数字（如 001, 002, 003...），由工具自动分配。
+
+- 新增时：自动分配下一个序号
+- 迁移时：按发现日期排序后自动重分配
 
 ---
 
@@ -64,7 +99,7 @@ src/issue_tracker/
 ```python
 @dataclass
 class Issue:
-    id: str                      # 问题编号 (如 C-001)
+    id: str                      # 问题编号 (如 001, 002)
     title: str                   # 标题
     priority: str                # 优先级 (P0/P1/P2/P3)
     status: str                  # 状态 (pending/in_progress/planned/fixed/n_a)
@@ -92,23 +127,27 @@ class Issue:
 
 ---
 
-## 通用化设计
+## 配置文件（config.yaml）
 
-### 核心思想
-| 组成部分 | 是否通用 | 处理方式 |
-|---------|---------|---------|
-| 核心表结构 | ✅ 通用 | 直接用 |
-| CLI 命令集 | ✅ 通用 | 直接用 |
-| GitHub 同步逻辑 | ✅ 通用 | 直接用 |
-| 编号体系 | ❌ 项目特定 | `config.yaml` |
-| 优先级/状态枚举 | ❌ 项目特定 | `config.yaml` |
-| 迁移脚本 | ❌ 项目特定 | migrator 插件 |
-| Export 格式 | ❌ 项目特定 | 参数化 |
+```yaml
+project:
+  id: "001"                      # 项目编号（纯数字）
+  name: "Project Name"
 
-### 新项目接入步骤
-1. 复制 `config.example.yaml` 为 `config.yaml`，修改项目配置
-2. 实现 `BaseMigrator` 子类解析项目特定格式
-3. 使用 `migrate --migrator <name>` 导入数据
+id_rules:
+  format: "{num:03d}"            # 全局自动递增序号格式
+
+priorities: [P0, P1, P2, P3]     # 优先级列表
+statuses: [pending, in_progress, planned, fixed, n_a]  # 状态列表
+
+github:
+  enabled: true
+  close_on_fix: true
+  comment_template: "自动同步: {issue_id} 已修复"
+
+export:
+  output: "exports/issues.md"    # 相对于 ISSUE_TRACKER_HOME
+```
 
 ---
 
@@ -116,14 +155,24 @@ class Issue:
 
 | 命令 | 功能 | 示例 |
 |------|------|------|
-| `add` | 新增问题 | `issue-tracker add --id M-037 --title "..."` |
-| `update` | 更新字段/状态 | `issue-tracker update M-037 --status fixed` |
+| `add` | 新增问题 | `issue-tracker add --title "..." --priority P2` |
+| `update` | 更新字段/状态 | `issue-tracker update 001 --status fixed` |
 | `query` | 多条件查询 | `issue-tracker query --status pending --priority P2` |
 | `list` | 简洁列表 | `issue-tracker list --status pending` |
 | `stats` | 统计概览 | `issue-tracker stats` |
 | `export` | 生成 Markdown | `issue-tracker export` |
 | `sync` | 同步到 GitHub | `issue-tracker sync --dry-run` |
 | `migrate` | 导入数据 | `issue-tracker migrate --source file.md --migrator weldsmart` |
+
+### 项目切换
+
+```bash
+# 通过 project_id 切换
+issue-tracker -p 001 stats
+
+# 手动指定配置文件
+issue-tracker -c /path/to/config.yaml query
+```
 
 ### Migrator 插件接口
 ```python
@@ -136,32 +185,11 @@ class BaseMigrator(ABC):
 
 ---
 
-## 配置文件（config.yaml）
+## 环境变量
 
-```yaml
-project:
-  name: "Project Name"
-  db_path: "path/to/issues.db"  # 相对于 git root
-
-id_rules:
-  format: "{prefix}-{num:03d}"
-  prefixes:
-    C: { priority: P0, label: "Critical" }
-    H: { priority: P1, label: "High" }
-    M: { priority: P2, label: "Medium" }
-    L: { priority: P3, label: "Low" }
-
-priorities: [P0, P1, P2, P3]
-statuses: [pending, in_progress, planned, fixed, n_a]
-
-github:
-  enabled: true
-  close_on_fix: true
-  comment_template: "自动同步: {issue_id} 已修复"
-
-export:
-  output: "docs/project/issues.md"
-```
+| 环境变量 | 说明 | 默认值 |
+|---------|------|--------|
+| `ISSUE_TRACKER_HOME` | 主目录路径 | `~/issue-tracker-cli` |
 
 ---
 

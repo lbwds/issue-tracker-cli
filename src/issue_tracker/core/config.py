@@ -40,22 +40,16 @@ class Config:
     # ── 公开属性 ─────────────────────────────────────────
 
     @property
+    def project_id(self) -> str:
+        return self._raw["project"]["id"]
+
+    @property
     def project_name(self) -> str:
         return self._raw["project"]["name"]
 
     @property
-    def db_path(self) -> str:
-        """返回 db_path（相对于 git root，由调用侧负责解析为绝对路径）."""
-        return self._raw["project"]["db_path"]
-
-    @property
     def id_format(self) -> str:
         return self._raw["id_rules"]["format"]
-
-    @property
-    def prefixes(self) -> dict[str, dict[str, str]]:
-        """返回前缀配置映射: { 'C': {'priority': 'P0', 'label': 'Critical'}, ... }"""
-        return self._raw["id_rules"]["prefixes"]
 
     @property
     def valid_priorities(self) -> list[str]:
@@ -79,19 +73,9 @@ class Config:
 
     @property
     def export_output(self) -> str:
-        return self._raw.get("export", {}).get("output", "docs/project/all-issues.md")
+        return self._raw.get("export", {}).get("output", "issues.md")
 
     # ── 辅助方法 ─────────────────────────────────────────
-
-    def priority_for_prefix(self, prefix: str) -> str | None:
-        """根据编号前缀返回优先级."""
-        entry = self.prefixes.get(prefix)
-        return entry["priority"] if entry else None
-
-    def label_for_prefix(self, prefix: str) -> str | None:
-        """根据编号前缀返回标签."""
-        entry = self.prefixes.get(prefix)
-        return entry["label"] if entry else None
 
     def is_valid_priority(self, priority: str) -> bool:
         return priority in self.valid_priorities
@@ -100,12 +84,8 @@ class Config:
         return status in self.valid_statuses
 
     def is_valid_id(self, issue_id: str) -> bool:
-        """校验编号格式是否合法（前缀-数字）."""
-        parts = issue_id.split("-", 1)
-        if len(parts) != 2:
-            return False
-        prefix, num = parts
-        return prefix in self.prefixes and num.isdigit()
+        """校验编号格式是否合法（纯数字）."""
+        return issue_id.isdigit()
 
     # ── 内部校验 ─────────────────────────────────────────
 
@@ -122,36 +102,20 @@ class Config:
             raise ValueError("配置校验失败:\n  " + "\n  ".join(errors))
 
         # project 子键
+        if "id" not in self._raw["project"]:
+            errors.append("缺少 project.id (纯数字项目编号)")
         if "name" not in self._raw["project"]:
             errors.append("缺少 project.name")
-        if "db_path" not in self._raw["project"]:
-            errors.append("缺少 project.db_path")
 
         # id_rules 子键
         if "format" not in self._raw["id_rules"]:
             errors.append("缺少 id_rules.format")
-        if "prefixes" not in self._raw["id_rules"]:
-            errors.append("缺少 id_rules.prefixes")
-        else:
-            for prefix, entry in self._raw["id_rules"]["prefixes"].items():
-                if "priority" not in entry:
-                    errors.append(f"前缀 {prefix} 缺少 priority")
-                if "label" not in entry:
-                    errors.append(f"前缀 {prefix} 缺少 label")
 
         # priorities 和 statuses 应为非空列表
         if not isinstance(self._raw["priorities"], list) or len(self._raw["priorities"]) == 0:
             errors.append("priorities 应为非空列表")
         if not isinstance(self._raw["statuses"], list) or len(self._raw["statuses"]) == 0:
             errors.append("statuses 应为非空列表")
-
-        # 前缀中引用的 priority 必须在 priorities 列表中
-        if "priorities" in self._raw and "id_rules" in self._raw:
-            valid_p = set(self._raw["priorities"])
-            for prefix, entry in self._raw.get("id_rules", {}).get("prefixes", {}).items():
-                p = entry.get("priority")
-                if p and p not in valid_p:
-                    errors.append(f"前缀 {prefix} 的 priority '{p}' 不在 priorities 列表中")
 
         if errors:
             raise ValueError("配置校验失败:\n  " + "\n  ".join(errors))

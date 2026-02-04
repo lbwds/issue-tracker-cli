@@ -1,6 +1,6 @@
 """Issue Tracker 单元测试.
 
-覆盖: 配置加载校验、数据库 CRUD、weldsmart_migrator 解析、export 格式、sync 逻辑。
+覆盖: 配置加载校验、数据库 CRUD、自动编号、weldsmart_migrator 解析、export 格式、sync 逻辑。
 
 运行方式:
     pip 模式: pytest tests/ -v
@@ -41,18 +41,11 @@ except ImportError:
 
 VALID_CONFIG_YAML = """\
 project:
+  id: "001"
   name: "TestProject"
-  db_path: "test.db"
 
 id_rules:
-  format: "{prefix}-{num:03d}"
-  prefixes:
-    C: { priority: P0, label: "Critical" }
-    H: { priority: P1, label: "High" }
-    M: { priority: P2, label: "Medium" }
-    L: { priority: P3, label: "Low" }
-    A: { priority: P2, label: "Architecture" }
-    T: { priority: P3, label: "Test" }
+  format: "{num:03d}"
 
 priorities: [P0, P1, P2, P3]
 statuses: [pending, in_progress, planned, fixed, n_a]
@@ -68,21 +61,16 @@ export:
 
 INVALID_CONFIG_MISSING_PROJECT = """\
 id_rules:
-  format: "{prefix}-{num:03d}"
-  prefixes:
-    C: { priority: P0, label: "Critical" }
+  format: "{num:03d}"
 priorities: [P0]
 statuses: [pending]
 """
 
-INVALID_CONFIG_BAD_PRIORITY_REF = """\
+INVALID_CONFIG_MISSING_PROJECT_ID = """\
 project:
   name: "Test"
-  db_path: "test.db"
 id_rules:
-  format: "{prefix}-{num:03d}"
-  prefixes:
-    C: { priority: P99, label: "Critical" }
+  format: "{num:03d}"
 priorities: [P0, P1]
 statuses: [pending]
 """
@@ -101,7 +89,7 @@ def _make_db() -> Database:
     return Database(":memory:")
 
 
-def _sample_issue(issue_id="M-001", title="测试问题", priority="P2", status="pending") -> Issue:
+def _sample_issue(issue_id="001", title="测试问题", priority="P2", status="pending") -> Issue:
     return Issue(
         id=issue_id,
         title=title,
@@ -126,11 +114,9 @@ class TestConfig(unittest.TestCase):
         path = _write_temp_config(VALID_CONFIG_YAML)
         try:
             config = Config(path)
+            self.assertEqual(config.project_id, "001")
             self.assertEqual(config.project_name, "TestProject")
-            self.assertEqual(config.db_path, "test.db")
-            self.assertIn("C", config.prefixes)
-            self.assertEqual(config.priority_for_prefix("C"), "P0")
-            self.assertEqual(config.label_for_prefix("M"), "Medium")
+            self.assertEqual(config.id_format, "{num:03d}")
             self.assertTrue(config.is_valid_priority("P2"))
             self.assertFalse(config.is_valid_priority("P99"))
             self.assertTrue(config.is_valid_status("fixed"))
@@ -150,8 +136,8 @@ class TestConfig(unittest.TestCase):
         finally:
             os.unlink(path)
 
-    def test_config_invalid_priority_reference(self):
-        path = _write_temp_config(INVALID_CONFIG_BAD_PRIORITY_REF)
+    def test_config_missing_project_id(self):
+        path = _write_temp_config(INVALID_CONFIG_MISSING_PROJECT_ID)
         try:
             with self.assertRaises(ValueError):
                 Config(path)
@@ -162,12 +148,22 @@ class TestConfig(unittest.TestCase):
         path = _write_temp_config(VALID_CONFIG_YAML)
         try:
             config = Config(path)
-            self.assertTrue(config.is_valid_id("C-001"))
-            self.assertTrue(config.is_valid_id("M-037"))
-            self.assertTrue(config.is_valid_id("A-004"))
-            self.assertFalse(config.is_valid_id("X-001"))   # 未知前缀
-            self.assertFalse(config.is_valid_id("C001"))    # 无连字符
-            self.assertFalse(config.is_valid_id("C-abc"))   # 非数字
+            self.assertTrue(config.is_valid_id("001"))
+            self.assertTrue(config.is_valid_id("037"))
+            self.assertTrue(config.is_valid_id("100"))
+            self.assertFalse(config.is_valid_id("C-001"))  # 旧前缀格式不合法
+            self.assertFalse(config.is_valid_id("abc"))    # 非数字
+            self.assertFalse(config.is_valid_id(""))       # 空字符串
+        finally:
+            os.unlink(path)
+
+    def test_id_format_rendering(self):
+        path = _write_temp_config(VALID_CONFIG_YAML)
+        try:
+            config = Config(path)
+            self.assertEqual(config.id_format.format(num=1), "001")
+            self.assertEqual(config.id_format.format(num=42), "042")
+            self.assertEqual(config.id_format.format(num=1000), "1000")
         finally:
             os.unlink(path)
 
@@ -187,68 +183,121 @@ class TestDatabaseCRUD(unittest.TestCase):
         self.db.close()
 
     def test_add_and_get(self):
-        issue = _sample_issue("C-001", "临界问题", "P0", "pending")
+        issue = _sample_issue("001", "临界问题", "P0", "pending")
         self.db.add_issue(issue)
 
-        result = self.db.get_issue("C-001")
+        result = self.db.get_issue("001")
         self.assertIsNotNone(result)
-        self.assertEqual(result.id, "C-001")
+        self.assertEqual(result.id, "001")
         self.assertEqual(result.title, "临界问题")
         self.assertEqual(result.priority, "P0")
 
     def test_get_nonexistent(self):
-        result = self.db.get_issue("Z-999")
+        result = self.db.get_issue("999")
         self.assertIsNone(result)
 
     def test_add_duplicate_raises(self):
         import sqlite3
-        issue = _sample_issue("M-001")
+        issue = _sample_issue("001")
         self.db.add_issue(issue)
         with self.assertRaises(sqlite3.IntegrityError):
             self.db.add_issue(issue)
 
     def test_update_issue(self):
-        self.db.add_issue(_sample_issue("M-001", status="pending"))
-        success = self.db.update_issue("M-001", status="fixed", fix_date="2026-02-01")
+        self.db.add_issue(_sample_issue("001", status="pending"))
+        success = self.db.update_issue("001", status="fixed", fix_date="2026-02-01")
         self.assertTrue(success)
 
-        result = self.db.get_issue("M-001")
+        result = self.db.get_issue("001")
         self.assertEqual(result.status, "fixed")
         self.assertEqual(result.fix_date, "2026-02-01")
 
     def test_update_nonexistent(self):
-        success = self.db.update_issue("Z-999", status="fixed")
+        success = self.db.update_issue("999", status="fixed")
         self.assertFalse(success)
 
     def test_update_no_fields(self):
-        self.db.add_issue(_sample_issue("M-001"))
-        success = self.db.update_issue("M-001")
+        self.db.add_issue(_sample_issue("001"))
+        success = self.db.update_issue("001")
         self.assertFalse(success)
 
     def test_delete_issue(self):
-        self.db.add_issue(_sample_issue("M-001"))
-        self.assertTrue(self.db.delete_issue("M-001"))
-        self.assertIsNone(self.db.get_issue("M-001"))
+        self.db.add_issue(_sample_issue("001"))
+        self.assertTrue(self.db.delete_issue("001"))
+        self.assertIsNone(self.db.get_issue("001"))
 
     def test_delete_nonexistent(self):
-        self.assertFalse(self.db.delete_issue("Z-999"))
+        self.assertFalse(self.db.delete_issue("999"))
 
     def test_issue_exists(self):
-        self.db.add_issue(_sample_issue("M-001"))
-        self.assertTrue(self.db.issue_exists("M-001"))
-        self.assertFalse(self.db.issue_exists("M-002"))
+        self.db.add_issue(_sample_issue("001"))
+        self.assertTrue(self.db.issue_exists("001"))
+        self.assertFalse(self.db.issue_exists("002"))
 
     def test_upsert_insert(self):
-        issue = _sample_issue("M-001", title="初始标题")
+        issue = _sample_issue("001", title="初始标题")
         self.db.upsert_issue(issue)
-        result = self.db.get_issue("M-001")
+        result = self.db.get_issue("001")
         self.assertEqual(result.title, "初始标题")
 
     def test_upsert_update(self):
-        self.db.upsert_issue(_sample_issue("M-001", title="初始"))
-        self.db.upsert_issue(_sample_issue("M-001", title="更新后"))
-        result = self.db.get_issue("M-001")
+        self.db.upsert_issue(_sample_issue("001", title="初始"))
+        self.db.upsert_issue(_sample_issue("001", title="更新后"))
+        result = self.db.get_issue("001")
         self.assertEqual(result.title, "更新后")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 自动编号测试
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+class TestDatabaseAutoId(unittest.TestCase):
+    """自动编号 get_next_id() 测试."""
+
+    def setUp(self):
+        self.db = _make_db()
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_next_id_empty_db(self):
+        """空数据库返回 1."""
+        self.assertEqual(self.db.get_next_id(), 1)
+
+    def test_next_id_sequential(self):
+        """插入 001, 002 后返回 3."""
+        self.db.add_issue(_sample_issue("001"))
+        self.db.add_issue(_sample_issue("002"))
+        self.assertEqual(self.db.get_next_id(), 3)
+
+    def test_next_id_with_gap(self):
+        """有间断时返回 max+1（不填补空缺）."""
+        self.db.add_issue(_sample_issue("001"))
+        self.db.add_issue(_sample_issue("005"))
+        self.assertEqual(self.db.get_next_id(), 6)
+
+    def test_next_id_after_delete(self):
+        """删除最大编号后，max 变为次大值，返回次大值+1."""
+        self.db.add_issue(_sample_issue("001"))
+        self.db.add_issue(_sample_issue("002"))
+        self.db.add_issue(_sample_issue("003"))
+        self.db.delete_issue("003")
+        self.assertEqual(self.db.get_next_id(), 3)
+
+    def test_next_id_ignores_non_numeric(self):
+        """非纯数字 ID（如迁移残留的旧格式）不影响计算."""
+        self.db.add_issue(_sample_issue("001"))
+        self.db.add_issue(_sample_issue("C-005", title="旧格式残留"))
+        # C-005 不是纯数字，GLOB '[0-9]*' 不匹配，仅看 001
+        self.assertEqual(self.db.get_next_id(), 2)
+
+    def test_next_id_large_number(self):
+        """超过3位数仍正确计算."""
+        self.db.add_issue(_sample_issue("999"))
+        self.assertEqual(self.db.get_next_id(), 1000)
+        self.db.add_issue(_sample_issue("1000"))
+        self.assertEqual(self.db.get_next_id(), 1001)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -262,13 +311,13 @@ class TestDatabaseQuery(unittest.TestCase):
     def setUp(self):
         self.db = _make_db()
         # 插入测试数据
-        self.db.add_issue(_sample_issue("C-001", "临界A", "P0", "fixed"))
-        self.db.add_issue(_sample_issue("M-001", "中等A", "P2", "pending"))
-        self.db.add_issue(_sample_issue("M-002", "中等B", "P2", "fixed"))
-        self.db.add_issue(_sample_issue("L-001", "低等A", "P3", "planned"))
+        self.db.add_issue(_sample_issue("001", "临界A", "P0", "fixed"))
+        self.db.add_issue(_sample_issue("002", "中等A", "P2", "pending"))
+        self.db.add_issue(_sample_issue("003", "中等B", "P2", "fixed"))
+        self.db.add_issue(_sample_issue("004", "低等A", "P3", "planned"))
         # 添加带不同文件路径的条目
         issue_hal = Issue(
-            id="H-001", title="HAL问题", priority="P1", status="pending",
+            id="005", title="HAL问题", priority="P1", status="pending",
             discovery_date="2026-01-15", file_path="src/hal/device/DeviceManager.cpp",
         )
         self.db.add_issue(issue_hal)
@@ -283,17 +332,17 @@ class TestDatabaseQuery(unittest.TestCase):
 
     def test_query_by_status(self):
         results = self.db.query_issues(status="pending")
-        self.assertEqual(len(results), 2)  # M-001 和 H-001
+        self.assertEqual(len(results), 2)  # 002 和 005
 
     def test_query_by_id(self):
-        results = self.db.query_issues(issue_id="C-001")
+        results = self.db.query_issues(issue_id="001")
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].id, "C-001")
+        self.assertEqual(results[0].id, "001")
 
     def test_query_by_file_glob(self):
         results = self.db.query_issues(file_glob="src/hal/*")
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0].id, "H-001")
+        self.assertEqual(results[0].id, "005")
 
     def test_query_no_match(self):
         results = self.db.query_issues(priority="P0", status="pending")
@@ -314,10 +363,10 @@ class TestDatabaseStats(unittest.TestCase):
 
     def setUp(self):
         self.db = _make_db()
-        self.db.add_issue(_sample_issue("C-001", priority="P0", status="fixed"))
-        self.db.add_issue(_sample_issue("C-002", priority="P0", status="fixed"))
-        self.db.add_issue(_sample_issue("M-001", status="pending"))
-        self.db.add_issue(_sample_issue("M-002", status="n_a"))
+        self.db.add_issue(_sample_issue("001", priority="P0", status="fixed"))
+        self.db.add_issue(_sample_issue("002", priority="P0", status="fixed"))
+        self.db.add_issue(_sample_issue("003", status="pending"))
+        self.db.add_issue(_sample_issue("004", status="n_a"))
 
     def tearDown(self):
         self.db.close()
@@ -341,7 +390,8 @@ class TestDatabaseStats(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════════════════════
 # WeldSmart Migrator 测试
 # ══════════════════════════════════════════════════════════════════════════════
-
+# 注意: migrator 负责解析源文件，返回原始编号（如 C-001）。
+# 编号重分配由 cmd_migrate 在写入数据库时执行，此处不测试。
 
 SAMPLE_MD_NORMAL = """\
 # 测试文档
@@ -436,7 +486,11 @@ SAMPLE_MD_MULTI_FILE = """\
 
 
 class TestWeldSmartMigrator(unittest.TestCase):
-    """WeldSmart migrator 解析测试."""
+    """WeldSmart migrator 解析测试.
+
+    migrator 解析返回原始编号(如 C-001)。
+    编号重分配由 cmd_migrate 在写入数据库时执行。
+    """
 
     def setUp(self):
         self.migrator = WeldSmartMigrator()
@@ -455,7 +509,7 @@ class TestWeldSmartMigrator(unittest.TestCase):
         issues = self._parse_from_str(SAMPLE_MD_NORMAL)
         self.assertEqual(len(issues), 2)
 
-        # 检查第一条
+        # 检查第一条（解析阶段仍保留原始编号）
         c001 = issues[0]
         self.assertEqual(c001["id"], "C-001")
         self.assertEqual(c001["title"], "ModbusTCPClient 内存泄漏")
@@ -533,24 +587,24 @@ class TestExporter(unittest.TestCase):
         self.config = Config(self.config_path)
         self.db = _make_db()
 
-        # 插入测试数据
+        # 插入测试数据（纯数字编号）
         self.db.add_issue(Issue(
-            id="C-001", title="临界问题", priority="P0", status="fixed",
+            id="001", title="临界问题", priority="P0", status="fixed",
             discovery_date="2026-01-19", fix_date="2026-01-19",
             file_path="src/core/test.cpp", description="临界描述",
         ))
         self.db.add_issue(Issue(
-            id="M-001", title="中等问题", priority="P2", status="pending",
+            id="002", title="中等问题", priority="P2", status="pending",
             discovery_date="2026-02-01", file_path="src/hal/test.cpp",
             description="中等描述", estimated_hours=2.0,
         ))
         self.db.add_issue(Issue(
-            id="A-001", title="架构问题", priority="P2", status="fixed",
+            id="003", title="架构问题", priority="P2", status="fixed",
             discovery_date="2026-02-01", fix_date="2026-02-02",
             description="架构描述", actual_hours=4.0,
         ))
         self.db.add_issue(Issue(
-            id="T-001", title="测试问题", priority="P3", status="planned",
+            id="004", title="测试问题", priority="P3", status="planned",
             discovery_date="2026-02-03", description="测试描述",
         ))
 
@@ -568,10 +622,10 @@ class TestExporter(unittest.TestCase):
                 content = f.read()
 
             # 所有编号应出现
-            self.assertIn("C-001", content)
-            self.assertIn("M-001", content)
-            self.assertIn("A-001", content)
-            self.assertIn("T-001", content)
+            self.assertIn("001", content)
+            self.assertIn("002", content)
+            self.assertIn("003", content)
+            self.assertIn("004", content)
         finally:
             os.unlink(output_path)
 
@@ -601,8 +655,10 @@ class TestExporter(unittest.TestCase):
 
             self.assertIn("Critical Priority", content)
             self.assertIn("Medium Priority", content)
-            self.assertIn("Architecture Issues", content)
-            self.assertIn("Test Issues", content)
+            self.assertIn("Low Priority", content)
+            # 不再有 Architecture/Test 独立段
+            self.assertNotIn("Architecture Issues", content)
+            self.assertNotIn("Test Issues", content)
         finally:
             os.unlink(output_path)
 
@@ -618,6 +674,35 @@ class TestExporter(unittest.TestCase):
             self.assertIn("✅ 已修复", content)
             self.assertIn("❌ 待修复", content)
             self.assertIn("📋 待规划", content)
+        finally:
+            os.unlink(output_path)
+
+    def test_export_header_uses_project_name(self):
+        exporter = Exporter(self.config, self.db)
+        fd, output_path = tempfile.mkstemp(suffix=".md")
+        os.close(fd)
+        try:
+            exporter.export(output_path)
+            with open(output_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            self.assertIn("TestProject", content)
+            # 不应出现硬编码的项目名
+            self.assertNotIn("WeldSmart Pro", content)
+        finally:
+            os.unlink(output_path)
+
+    def test_export_sequential_numbering_spec(self):
+        exporter = Exporter(self.config, self.db)
+        fd, output_path = tempfile.mkstemp(suffix=".md")
+        os.close(fd)
+        try:
+            exporter.export(output_path)
+            with open(output_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            # 编号规则说明应为序号模式
+            self.assertIn("全局自动递增序号", content)
         finally:
             os.unlink(output_path)
 
@@ -648,7 +733,7 @@ class TestGithubSync(unittest.TestCase):
     def test_sync_dry_run_with_pending(self):
         """有待同步条目时，dry-run 列出条目但不执行."""
         self.db.add_issue(Issue(
-            id="M-001", title="已修复问题", priority="P2", status="fixed",
+            id="001", title="已修复问题", priority="P2", status="fixed",
             discovery_date="2026-01-01", github_issue_id=42,
         ))
         syncer = GithubSync(self.config, self.db)
@@ -664,7 +749,7 @@ class TestGithubSync(unittest.TestCase):
         mock_close.return_value = (True, None)
 
         self.db.add_issue(Issue(
-            id="M-001", title="已修复", priority="P2", status="fixed",
+            id="001", title="已修复", priority="P2", status="fixed",
             discovery_date="2026-01-01", github_issue_id=42,
         ))
 
@@ -673,7 +758,7 @@ class TestGithubSync(unittest.TestCase):
 
         self.assertEqual(result["success"], 1)
         self.assertEqual(result["failed"], 0)
-        mock_close.assert_called_once_with(42, "自动同步: M-001 已修复")
+        mock_close.assert_called_once_with(42, "自动同步: 001 已修复")
 
         # 再次同步应无待处理（已记录日志）
         result2 = syncer.sync(dry_run=True)
@@ -685,7 +770,7 @@ class TestGithubSync(unittest.TestCase):
         mock_close.return_value = (False, "网络超时")
 
         self.db.add_issue(Issue(
-            id="M-001", title="已修复", priority="P2", status="fixed",
+            id="001", title="已修复", priority="P2", status="fixed",
             discovery_date="2026-01-01", github_issue_id=42,
         ))
 
@@ -730,7 +815,7 @@ class TestGithubSyncQuery(unittest.TestCase):
     def test_pending_sync_excludes_no_github_id(self):
         """无 github_issue_id 的 fixed 条目不应出现."""
         self.db.add_issue(Issue(
-            id="M-001", title="无GH", priority="P2", status="fixed",
+            id="001", title="无GH", priority="P2", status="fixed",
             discovery_date="2026-01-01", github_issue_id=None,
         ))
         pending = self.db.get_pending_github_sync()
@@ -739,7 +824,7 @@ class TestGithubSyncQuery(unittest.TestCase):
     def test_pending_sync_excludes_non_fixed(self):
         """非 fixed 状态的条目不应出现."""
         self.db.add_issue(Issue(
-            id="M-001", title="未修复", priority="P2", status="pending",
+            id="001", title="未修复", priority="P2", status="pending",
             discovery_date="2026-01-01", github_issue_id=42,
         ))
         pending = self.db.get_pending_github_sync()
@@ -748,7 +833,7 @@ class TestGithubSyncQuery(unittest.TestCase):
     def test_pending_sync_includes_fixed_with_gh_id(self):
         """fixed + 有 github_issue_id + 未同步 → 应出现."""
         self.db.add_issue(Issue(
-            id="M-001", title="待同步", priority="P2", status="fixed",
+            id="001", title="待同步", priority="P2", status="fixed",
             discovery_date="2026-01-01", github_issue_id=42,
         ))
         pending = self.db.get_pending_github_sync()
@@ -757,11 +842,11 @@ class TestGithubSyncQuery(unittest.TestCase):
     def test_pending_sync_excludes_already_synced(self):
         """已成功同步过的条目不应再次出现."""
         self.db.add_issue(Issue(
-            id="M-001", title="已同步", priority="P2", status="fixed",
+            id="001", title="已同步", priority="P2", status="fixed",
             discovery_date="2026-01-01", github_issue_id=42,
         ))
         # 记录同步成功日志
-        self.db.log_github_sync("M-001", 42, "close", "success")
+        self.db.log_github_sync("001", 42, "close", "success")
 
         pending = self.db.get_pending_github_sync()
         self.assertEqual(len(pending), 0)

@@ -202,6 +202,17 @@ class Database:
         ).fetchone()
         return row is not None
 
+    def get_next_id(self) -> int:
+        """返回下一个可用的序号.
+
+        查询当前数据库中所有纯数字 ID 的最大值，返回 max+1。
+        数据库为空或无纯数字 ID 时返回 1。
+        """
+        row = self._conn.execute(
+            "SELECT MAX(CAST(id AS INTEGER)) as max_id FROM issues WHERE id GLOB '[0-9]*'"
+        ).fetchone()
+        return (row["max_id"] or 0) + 1
+
     # ── 查询 ─────────────────────────────────────────────────────────────────
 
     def query_issues(

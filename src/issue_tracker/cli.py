@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 """Issue Tracker CLI 入口.
 
-通用开发工具，换项目只需替换 config.yaml 和对应的 migrator 即可复用。
+通用开发工具，支持多项目独立运行。
+通过 -p project_id 切换项目，项目配置和数据库存储在 ISSUE_TRACKER_HOME 下。
 
 支持两种使用方式:
 1. pip install: issue-tracker ...
 2. 直接运行: python3 cli.py ...
 
 用法:
-    issue-tracker [-c CONFIG] <command> [options]
+    issue-tracker [-p PROJECT_ID] [-c CONFIG] <command> [options]
 
 命令:
-    add       新增问题
+    add       新增问题（编号自动分配）
     update    更新问题字段/状态
     query     多条件过滤查询
     list      简洁表格列出
     stats     统计概览
     export    生成 markdown
     sync      同步到 GitHub
-    migrate   导入外部数据
+    migrate   导入外部数据（编号自动重分配）
 """
 
 import argparse
@@ -47,27 +48,81 @@ except ImportError:
     from issue_tracker.migrators.weldsmart_migrator import WeldSmartMigrator
 
 
-# ── 全局常量 ─────────────────────────────────────────────────────────────────
+# ── 路径解析 ─────────────────────────────────────────────────────────────────
+
+
+def _get_tracker_home() -> str:
+    """获取 issue-tracker 主目录.
+
+    优先级: ISSUE_TRACKER_HOME 环境变量 > ~/issue-tracker-cli/
+    """
+    return os.environ.get("ISSUE_TRACKER_HOME", os.path.expanduser("~/issue-tracker-cli"))
+
+
+def _sanitize_name(name: str) -> str:
+    """清理名称用于文件名: 保留字母数字和下划线，其余替换为下划线."""
+    import re
+    return re.sub(r'[^\w]', '_', name).strip('_')
+
+
+def _find_project_config(project_id: str) -> str:
+    """根据 project_id 在 ISSUE_TRACKER_HOME/.config/ 中查找配置文件.
+
+    匹配规则: {project_id}_*.yaml
+    """
+    import glob as glob_mod
+
+    config_dir = os.path.join(_get_tracker_home(), ".config")
+    if not os.path.isdir(config_dir):
+        raise FileNotFoundError(
+            f"配置目录不存在: {config_dir}\n"
+            f"请先创建该目录并放置项目配置文件 (如 {project_id}_ProjectName.yaml)"
+        )
+
+    pattern = os.path.join(config_dir, f"{project_id}_*.yaml")
+    matches = glob_mod.glob(pattern)
+    if not matches:
+        all_configs = glob_mod.glob(os.path.join(config_dir, "*.yaml"))
+        available = [os.path.basename(c) for c in all_configs] if all_configs else ["(无)"]
+        raise FileNotFoundError(
+            f"未找到项目 '{project_id}' 的配置文件\n"
+            f"搜索路径: {config_dir}\n"
+            f"可用项目: {available}"
+        )
+    if len(matches) > 1:
+        raise ValueError(
+            f"项目 '{project_id}' 匹配到多个配置文件: {[os.path.basename(m) for m in matches]}"
+        )
+    return matches[0]
+
 
 def _get_default_config() -> str:
     """查找默认配置文件.
 
     查找优先级:
     1. 当前目录的 config.yaml
-    2. git root 目录的 config.yaml
-    3. 包安装目录的 config.yaml (pip install 模式)
+    2. ISSUE_TRACKER_HOME/.config/ 中唯一的配置文件（仅一个项目时自动使用）
+    3. git root 目录的 config.yaml (兼容旧模式)
 
     Returns:
-        找到的配置文件路径，如果都不存在则返回包安装目录的 config.yaml 路径
+        找到的配置文件路径
     """
     import subprocess
+    import glob as glob_mod
 
     # 1. 当前目录
     current_config = os.path.join(os.getcwd(), "config.yaml")
     if os.path.isfile(current_config):
         return current_config
 
-    # 2. git root 目录
+    # 2. ISSUE_TRACKER_HOME/.config/ 中唯一配置
+    config_dir = os.path.join(_get_tracker_home(), ".config")
+    if os.path.isdir(config_dir):
+        configs = glob_mod.glob(os.path.join(config_dir, "*.yaml"))
+        if len(configs) == 1:
+            return configs[0]
+
+    # 3. git root 目录
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
@@ -80,69 +135,41 @@ def _get_default_config() -> str:
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
 
-    # 3. 包安装目录（回退到原有逻辑）
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "config.yaml"
-    )
-
-DEFAULT_CONFIG = None  # 运行时动态查找
-
-
-def _find_git_root() -> str:
-    """查找当前工作目录所在的 git 仓库根目录."""
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, check=True,
-        )
-        return result.stdout.strip()
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        # 回退到当前工作目录
-        return os.getcwd()
+    # 回退: 返回当前目录下的 config.yaml（即使不存在，后续会报错）
+    return current_config
 
 
 def _resolve_db_path(config: Config) -> str:
-    """将 config 中的 db_path (相对 git root) 解析为绝对路径."""
-    git_root = _find_git_root()
-    return os.path.join(git_root, config.db_path)
+    """解析数据库路径.
+
+    路径: ISSUE_TRACKER_HOME/data/{project_id}_{project_name}.db
+    自动创建 data/ 目录。
+    """
+    home = _get_tracker_home()
+    data_dir = os.path.join(home, "data")
+    os.makedirs(data_dir, exist_ok=True)
+    db_name = f"{config.project_id}_{_sanitize_name(config.project_name)}.db"
+    return os.path.join(data_dir, db_name)
 
 
 # ── 命令实现 ─────────────────────────────────────────────────────────────────
 
 
 def cmd_add(args, config: Config, db: Database):
-    """新增问题条目."""
+    """新增问题条目（编号自动分配）."""
     from issue_tracker.core.model import Issue
 
     # 校验必填字段
-    if not args.id:
-        print("错误: --id 是必填参数", file=sys.stderr)
-        sys.exit(1)
     if not args.title:
         print("错误: --title 是必填参数", file=sys.stderr)
         sys.exit(1)
-
-    # 校验编号格式
-    if not config.is_valid_id(args.id):
-        print(f"错误: 编号 '{args.id}' 格式无效。合法前缀: {list(config.prefixes.keys())}", file=sys.stderr)
-        sys.exit(1)
-
-    # 编号已存在检查
-    if db.issue_exists(args.id):
-        print(f"错误: 编号 '{args.id}' 已存在", file=sys.stderr)
+    if not args.priority:
+        print("错误: --priority 是必填参数", file=sys.stderr)
         sys.exit(1)
 
     # 优先级校验
-    priority = args.priority
-    if not priority:
-        # 根据前缀自动推断
-        prefix = args.id.split("-")[0]
-        priority = config.priority_for_prefix(prefix)
-    if not config.is_valid_priority(priority):
-        print(f"错误: 优先级 '{priority}' 无效。合法值: {config.valid_priorities}", file=sys.stderr)
+    if not config.is_valid_priority(args.priority):
+        print(f"错误: 优先级 '{args.priority}' 无效。合法值: {config.valid_priorities}", file=sys.stderr)
         sys.exit(1)
 
     # 状态校验
@@ -151,14 +178,29 @@ def cmd_add(args, config: Config, db: Database):
         print(f"错误: 状态 '{status}' 无效。合法值: {config.valid_statuses}", file=sys.stderr)
         sys.exit(1)
 
+    # 确定编号
+    if args.id:
+        # 手动指定编号
+        if not config.is_valid_id(args.id):
+            print(f"错误: 编号 '{args.id}' 格式无效（应为纯数字）", file=sys.stderr)
+            sys.exit(1)
+        if db.issue_exists(args.id):
+            print(f"错误: 编号 '{args.id}' 已存在", file=sys.stderr)
+            sys.exit(1)
+        issue_id = args.id
+    else:
+        # 自动分配编号
+        next_num = db.get_next_id()
+        issue_id = config.id_format.format(num=next_num)
+
     # 发现日期
     from datetime import date
     discovery_date = args.discovery_date or date.today().isoformat()
 
     issue = Issue(
-        id=args.id,
+        id=issue_id,
         title=args.title,
-        priority=priority,
+        priority=args.priority,
         status=status,
         discovery_date=discovery_date,
         fix_date=args.fix_date,
@@ -298,23 +340,6 @@ def cmd_stats(args, config: Config, db: Database):
         pct = f"{int(fixed / total * 100)}%" if total > 0 else "N/A"
         print(f"  {p:<10} {total:>5} {fixed:>6} {pending:>6} {pct:>6}")
 
-    # 特殊前缀 A/T 的统计（如果数据库中有的话）
-    all_issues = db.query_issues()
-    a_issues = [i for i in all_issues if i.id.startswith("A-")]
-    t_issues = [i for i in all_issues if i.id.startswith("T-")]
-    if a_issues:
-        total = len(a_issues)
-        fixed = sum(1 for i in a_issues if i.status == "fixed")
-        pending = total - fixed
-        pct = f"{int(fixed / total * 100)}%" if total > 0 else "N/A"
-        print(f"  {'A(Arch)':<10} {total:>5} {fixed:>6} {pending:>6} {pct:>6}")
-    if t_issues:
-        total = len(t_issues)
-        fixed = sum(1 for i in t_issues if i.status == "fixed")
-        pending = total - fixed
-        pct = f"{int(fixed / total * 100)}%" if total > 0 else "N/A"
-        print(f"  {'T(Test)':<10} {total:>5} {fixed:>6} {pending:>6} {pct:>6}")
-
     print()
 
     # 按状态统计
@@ -329,7 +354,11 @@ def cmd_stats(args, config: Config, db: Database):
 def cmd_export(args, config: Config, db: Database):
     """生成 markdown 文件."""
     exporter = Exporter(config, db)
-    output = args.output or None
+    if args.output:
+        output = args.output
+    else:
+        # export.output 相对于 ISSUE_TRACKER_HOME
+        output = os.path.join(_get_tracker_home(), config.export_output)
     path = exporter.export(output)
     print(f"已导出至: {path}")
 
@@ -341,7 +370,7 @@ def cmd_sync(args, config: Config, db: Database):
 
 
 def cmd_migrate(args, config: Config, db: Database):
-    """导入外部数据."""
+    """导入外部数据（编号自动重分配）."""
     # 加载 migrator 插件
     migrator = _load_migrator(args.migrator)
     if migrator is None:
@@ -352,12 +381,6 @@ def cmd_migrate(args, config: Config, db: Database):
     if not os.path.isfile(source_path):
         print(f"错误: 源文件不存在: {source_path}", file=sys.stderr)
         sys.exit(1)
-
-    # 检查数据库是否已有数据
-    if not args.force:
-        existing = db.query_issues()
-        if existing:
-            print(f"数据库已有 {len(existing)} 条记录。使用 --force 强制覆盖，或不传该参数将跳过已存在的条目。")
 
     # 解析源文件
     print(f"解析: {source_path}")
@@ -372,21 +395,37 @@ def cmd_migrate(args, config: Config, db: Database):
             print(f"  ⚠ {w}")
         print()
 
+    # 按发现日期排序，同日期按原编号字典序（保证编号分配顺序确定）
+    raw_issues.sort(key=lambda x: (x.get("discovery_date", ""), x.get("id", "")))
+
     if args.dry_run:
-        print("[dry-run] 仅解析，不写入数据库。")
-        print("\n前10条预览:")
+        print("[dry-run] 仅预览，不写入数据库。编号为预计自动分配值。\n")
+        next_num = db.get_next_id()
+        print("前10条预览:")
         for item in raw_issues[:10]:
-            print(f"  {item['id']}: {item['title']} [{item['priority']}/{item['status']}]")
+            preview_id = config.id_format.format(num=next_num)
+            next_num += 1
+            print(f"  {preview_id}: {item['title']} [{item['priority']}/{item['status']}]  (原编号: {item['id']})")
         return
 
-    # 写入数据库
+    # --force: 清空现有数据后导入
+    if args.force:
+        existing = db.query_issues()
+        for e in existing:
+            db.delete_issue(e.id)
+        print(f"已清空 {len(existing)} 条现有记录")
+
+    # 写入数据库，编号自动分配
     from issue_tracker.core.model import Issue
 
+    next_num = db.get_next_id()
     inserted = 0
-    skipped = 0
     for raw in raw_issues:
+        new_id = config.id_format.format(num=next_num)
+        next_num += 1
+
         issue = Issue(
-            id=raw["id"],
+            id=new_id,
             title=raw["title"],
             priority=raw["priority"],
             status=raw["status"],
@@ -403,17 +442,12 @@ def cmd_migrate(args, config: Config, db: Database):
             github_issue_id=raw.get("github_issue_id"),
         )
 
-        if args.force:
-            db.upsert_issue(issue)
-            inserted += 1
-        else:
-            if db.issue_exists(issue.id):
-                skipped += 1
-            else:
-                db.add_issue(issue)
-                inserted += 1
+        db.add_issue(issue)
+        inserted += 1
 
-    print(f"迁移完成: 插入 {inserted} 条, 跳过 {skipped} 条")
+    first_id = config.id_format.format(num=next_num - inserted)
+    last_id = config.id_format.format(num=next_num - 1)
+    print(f"迁移完成: 插入 {inserted} 条 (编号范围: {first_id} ~ {last_id})")
 
 
 # ── 辅助函数 ─────────────────────────────────────────────────────────────────
@@ -447,18 +481,11 @@ def _parse_int(val) -> int | None:
 
 
 def _format_relative_date(date_str: str | None) -> str:
-    """将日期格式化为相对时间（今天/昨天/N天前）或具体日期.
-
-    Args:
-        date_str: 日期字符串 (YYYY-MM-DD)
-
-    Returns:
-        相对时间描述或具体日期
-    """
+    """将日期格式化为相对时间（今天/昨天/N天前）或具体日期."""
     if not date_str:
         return ""
 
-    from datetime import date, timedelta
+    from datetime import date
 
     try:
         target_date = date.fromisoformat(date_str)
@@ -554,18 +581,19 @@ def _print_issue_detail(issue):
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="issue-tracker",
-        description="Issue Tracker CLI - 通用开发工具",
+        description="Issue Tracker CLI - 通用开发工具（支持多项目）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("-c", "--config", default=None, help="配置文件路径（默认: 自动查找当前目录或 git root）")
+    parser.add_argument("-p", "--project", help="项目ID（纯数字），从 ISSUE_TRACKER_HOME/.config/ 查找配置")
+    parser.add_argument("-c", "--config", default=None, help="手动指定配置文件路径")
 
     subparsers = parser.add_subparsers(dest="command", help="命令")
 
     # ── add ──
-    p_add = subparsers.add_parser("add", help="新增问题")
-    p_add.add_argument("--id", required=True, help="问题编号 (如 M-037)")
+    p_add = subparsers.add_parser("add", help="新增问题（编号自动分配）")
+    p_add.add_argument("--id", help="手动指定编号（纯数字，默认自动分配）")
     p_add.add_argument("--title", required=True, help="问题标题")
-    p_add.add_argument("--priority", help="优先级 (P0/P1/P2/P3)，未指定时根据编号前缀推断")
+    p_add.add_argument("--priority", required=True, help="优先级 (P0/P1/P2/P3)")
     p_add.add_argument("--status", default="pending", help="状态 (默认: pending)")
     p_add.add_argument("--discovery-date", help="发现日期 YYYY-MM-DD (默认: 今天)")
     p_add.add_argument("--fix-date", help="修复日期 YYYY-MM-DD")
@@ -616,18 +644,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ── export ──
     p_exp = subparsers.add_parser("export", help="生成 markdown")
-    p_exp.add_argument("--output", help="输出路径（默认: config 中 export.output）")
+    p_exp.add_argument("--output", help="输出路径（默认: 相对于 ISSUE_TRACKER_HOME 的 export.output）")
 
     # ── sync ──
     p_sync = subparsers.add_parser("sync", help="同步到 GitHub")
     p_sync.add_argument("--dry-run", action="store_true", help="仅预览，不实际执行")
 
     # ── migrate ──
-    p_mig = subparsers.add_parser("migrate", help="导入外部数据")
+    p_mig = subparsers.add_parser("migrate", help="导入外部数据（编号自动重分配）")
     p_mig.add_argument("--source", required=True, help="源文件路径")
     p_mig.add_argument("--migrator", required=True, help="migrator 名称 (如 weldsmart)")
-    p_mig.add_argument("--force", action="store_true", help="强制覆盖已有数据")
-    p_mig.add_argument("--dry-run", action="store_true", help="仅解析，不写入数据库")
+    p_mig.add_argument("--force", action="store_true", help="清空现有数据后导入")
+    p_mig.add_argument("--dry-run", action="store_true", help="仅解析预览，不写入数据库")
 
     return parser
 
@@ -643,10 +671,20 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    # 加载配置
-    # 如果没有指定配置文件，动态查找
-    config_path = args.config
-    if config_path is None:
+    # 解析配置文件路径
+    config_path = None
+    if args.project:
+        # -p 模式: 从 ISSUE_TRACKER_HOME/.config/ 查找
+        try:
+            config_path = _find_project_config(args.project)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"项目查找失败: {e}", file=sys.stderr)
+            sys.exit(1)
+    elif args.config:
+        # -c 模式: 手动指定配置文件
+        config_path = args.config
+    else:
+        # 回退: 自动查找
         config_path = _get_default_config()
 
     try:
