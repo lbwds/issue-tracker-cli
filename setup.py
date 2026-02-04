@@ -24,10 +24,10 @@ setup(
     description="通用 Issue 追踪 CLI 工具，支持 SQLite 存储和 Markdown 导出",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/your-org/issue-tracker-cli",
+    url="https://github.com/lbwds/issue-tracker-cli",
     project_urls={
-        "Bug Reports": "https://github.com/your-org/issue-tracker-cli/issues",
-        "Source": "https://github.com/your-org/issue-tracker-cli",
+        "Bug Reports": "https://github.com/lbwds/issue-tracker-cli/issues",
+        "Source": "https://github.com/lbwds/issue-tracker-cli",
     },
     package_dir={"": "src"},
     packages=find_packages(where="src"),
