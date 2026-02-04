@@ -49,7 +49,7 @@ except ImportError:
 
 # ── 全局常量 ─────────────────────────────────────────────────────────────────
 
-def _find_default_config() -> str:
+def _get_default_config() -> str:
     """查找默认配置文件.
 
     查找优先级:
@@ -86,7 +86,7 @@ def _find_default_config() -> str:
         "config.yaml"
     )
 
-DEFAULT_CONFIG = _find_default_config()
+DEFAULT_CONFIG = None  # 运行时动态查找
 
 
 def _find_git_root() -> str:
@@ -557,7 +557,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Issue Tracker CLI - 通用开发工具",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("-c", "--config", default=DEFAULT_CONFIG, help="配置文件路径（默认: 同目录 config.yaml）")
+    parser.add_argument("-c", "--config", default=None, help="配置文件路径（默认: 自动查找当前目录或 git root）")
 
     subparsers = parser.add_subparsers(dest="command", help="命令")
 
@@ -644,8 +644,13 @@ def main():
         sys.exit(1)
 
     # 加载配置
+    # 如果没有指定配置文件，动态查找
+    config_path = args.config
+    if config_path is None:
+        config_path = _get_default_config()
+
     try:
-        config = Config(args.config)
+        config = Config(config_path)
     except (FileNotFoundError, ValueError) as e:
         print(f"配置加载失败: {e}", file=sys.stderr)
         sys.exit(1)
