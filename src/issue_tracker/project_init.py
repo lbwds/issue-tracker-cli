@@ -19,11 +19,18 @@ except ImportError:
     print("错误: 需要 PyYAML。请执行: pip install pyyaml", file=sys.stderr)
     sys.exit(1)
 
+from issue_tracker.__version__ import __version__
 from issue_tracker.core.global_config import GlobalConfig
 from issue_tracker.core.paths import CONFIG_FILENAME, ensure_directories
 from issue_tracker.core.terminal import (
-    C, dim, err, input_line, menu, ok, title_bar, value, wait_key, yes_no,
+    C, banner_line, dim, err, input_line, menu, ok, section_header, value,
+    wait_key, yes_no,
 )
+
+
+def _banner():
+    """返回当前版本的装饰行列表（作为 menu header 传入）."""
+    return [banner_line(f"Issue Tracker v{__version__}")]
 
 
 # ── 工具函数 ─────────────────────────────────────────────
@@ -100,7 +107,7 @@ def guided_create(config_path: str):
     gc = GlobalConfig()
 
     print()
-    title_bar("Issue Tracker - 新项目引导配置")
+    section_header("新项目引导配置")
     print()
 
     # 项目 ID
@@ -171,6 +178,7 @@ def guided_create(config_path: str):
         choice = menu(
             "新项目配置",
             ["查看预览", f"{ok('✓ 提交创建')}", f"{err('✗ 取消')}"],
+            header=_banner(),
             footer="↑↓ 选择  Enter 确认  Esc 取消",
             item_colors={IDX_SUBMIT: C.GREEN, IDX_CANCEL: C.RED},
         )
@@ -181,7 +189,7 @@ def guided_create(config_path: str):
 
         if choice == IDX_PREVIEW:
             print()
-            title_bar("配置预览")
+            section_header("配置预览")
             print(render_yaml(config_data))
             print(f"  {dim('写入路径:')} {value(config_path)}")
             if os.path.isfile(config_path):
@@ -237,6 +245,7 @@ def edit_menu(config_path: str, data: dict):
 
         choice = menu(
             title, options,
+            header=_banner(),
             footer="↑↓ 选择  Enter 确认  Esc 返回",
             separators={IDX_SEP},
             item_colors={IDX_SUBMIT: C.GREEN, IDX_CANCEL: C.RED},
@@ -253,7 +262,7 @@ def edit_menu(config_path: str, data: dict):
 
         if choice == IDX_VIEW:
             print()
-            title_bar("当前配置")
+            section_header("当前配置")
             print(render_yaml(working))
             wait_key()
         elif choice == IDX_PROJ_INFO:
@@ -325,6 +334,7 @@ def _edit_github(data: dict):
         choice = menu(
             "GitHub 配置",
             options,
+            header=_banner(),
             footer="↑↓ 选择  Enter 确认  Esc 返回",
         )
 

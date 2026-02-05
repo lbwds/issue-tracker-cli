@@ -30,10 +30,15 @@ from issue_tracker.core.paths import (
     get_data_dir,
 )
 from issue_tracker.core.terminal import (
-    C, c, dim, err, input_line, label, menu, ok, title_bar, value, wait_key,
-    warn, yes_no,
+    C, banner_line, dim, err, input_line, label, menu, ok, section_header,
+    value, wait_key, warn, yes_no,
 )
 from issue_tracker.project_init import edit_menu, load_yaml, save_config
+
+
+def _banner():
+    """返回当前版本的装饰行列表（作为 menu header 传入）."""
+    return [banner_line(f"Issue Tracker v{__version__}")]
 
 
 # ── 查看当前路径 ─────────────────────────────────────────
@@ -50,7 +55,7 @@ def _view_paths():
         return ok("✓") if check(path) else err("✗")
 
     print()
-    title_bar("当前路径")
+    section_header("当前路径")
     print(f"  {label('配置目录:')}     {value(config_dir)}  [{_flag(config_dir, True)}]")
     print(f"  {label('数据目录:')}     {value(data_dir)}  [{_flag(data_dir, True)}]")
     print(f"  {label('备份目录:')}     {value(backups_dir)}  [{_flag(backups_dir, True)}]")
@@ -103,6 +108,7 @@ def _global_config_menu():
 
         choice = menu(
             title, options,
+            header=_banner(),
             footer="↑↓ 选择  Enter 确认  Esc 返回",
             separators={IDX_SEP},
             item_colors={IDX_SUBMIT: C.GREEN, IDX_CANCEL: C.RED},
@@ -153,7 +159,7 @@ def _global_config_menu():
 
 def _view_env_info():
     print()
-    title_bar("版本与环境信息")
+    section_header("版本与环境信息")
     print(f"  {label('issue-tracker 版本:')} {value(__version__)}")
     print(f"  {label('Python 版本:')}        {value(sys.version.split()[0])}")
     print(f"  {label('Python 路径:')}        {value(sys.executable)}")
@@ -219,7 +225,7 @@ def _project_mgmt_menu():
             print("  " + dim("无项目配置。使用 iss-project 在项目目录创建。"))
             wait_key()
             return
-        title_bar("当前项目列表")
+        section_header("当前项目列表")
         for p in projects:
             db = _find_db(p)
             pid = p["id"]
@@ -238,7 +244,7 @@ def _project_mgmt_menu():
             return
 
         proj_options = [f"[{p['id']}] {p['name']}" for p in projects]
-        choice = menu("选择项目备份", proj_options, footer="↑↓ 选择  Enter 确认  Esc 返回")
+        choice = menu("选择项目备份", proj_options, header=_banner(), footer="↑↓ 选择  Enter 确认  Esc 返回")
         if choice is None:
             return
 
@@ -267,7 +273,7 @@ def _project_mgmt_menu():
             return
 
         backup_options = [os.path.basename(bp) for bp in backups]
-        choice = menu("选择备份恢复", backup_options, footer="↑↓ 选择  Enter 确认  Esc 返回")
+        choice = menu("选择备份恢复", backup_options, header=_banner(), footer="↑↓ 选择  Enter 确认  Esc 返回")
         if choice is None:
             return
 
@@ -275,7 +281,7 @@ def _project_mgmt_menu():
 
         # 预览内容
         print()
-        title_bar("备份内容预览")
+        section_header("备份内容预览")
         with tarfile.open(backup_path, "r:gz") as tar:
             members = tar.getnames()
             for m in members:
@@ -305,6 +311,7 @@ def _project_mgmt_menu():
         choice = menu(
             "全局项目管理",
             ["查看所有项目", "备份项目", "恢复项目"],
+            header=_banner(),
             footer="↑↓ 选择  Enter 确认  Esc 返回",
         )
         if choice is None:
@@ -357,7 +364,7 @@ def _github_config_menu():
 
         # 选择目标项目
         proj_options = [t[0] for t in targets]
-        choice = menu("选择目标项目", proj_options, footer="↑↓ 选择  Enter 确认  Esc 返回")
+        choice = menu("选择目标项目", proj_options, header=_banner(), footer="↑↓ 选择  Enter 确认  Esc 返回")
         if choice is None:
             return
         config_path = targets[choice][1]
@@ -387,7 +394,7 @@ def _github_config_menu():
 
         # 仓库列表 menu，末项为手动输入
         repo_options = repos + ["手动输入..."]
-        repo_choice = menu("选择仓库", repo_options, footer="↑↓ 选择  Enter 确认  Esc 返回")
+        repo_choice = menu("选择仓库", repo_options, header=_banner(), footer="↑↓ 选择  Enter 确认  Esc 返回")
         if repo_choice is None:
             return
 
@@ -414,6 +421,7 @@ def _github_config_menu():
         choice = menu(
             "GitHub 连接配置",
             ["检查登录状态", "绑定仓库到项目"],
+            header=_banner(),
             footer="↑↓ 选择  Enter 确认  Esc 返回",
         )
         if choice is None:
@@ -456,6 +464,7 @@ def main_ui():
             choice = menu(
                 "Issue Tracker - 管理菜单",
                 labels,
+                header=_banner(),
                 footer="↑↓ 选择  Enter 确认  Esc 退出",
             )
             if choice is None:

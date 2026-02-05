@@ -5,6 +5,7 @@
 """
 
 import os
+import re as _re
 import select
 import sys
 import termios
@@ -58,12 +59,13 @@ def getch() -> str:
     """Raw 模式单键读取 + CSI 序列解析.
 
     Ctrl+C 抛出 KeyboardInterrupt。
+    使用 os.read(fd) + select([fd]) 避免 Python TextIOWrapper 缓冲干扰。
     """
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-        ch = sys.stdin.read(1)
+        ch = os.read(fd, 1).decode("latin-1")
 
         if ch == "\x03":  # Ctrl+C
             raise KeyboardInterrupt
@@ -71,7 +73,7 @@ def getch() -> str:
         if ch == "\x04":  # Ctrl+D
             return Key.ESC
 
-        if ch == "\x0d" or ch == "\x0a":  # Enter
+        if ch in ("\x0d", "\x0a"):  # Enter
             return Key.ENTER
 
         if ch == "\x09":  # Tab
@@ -81,21 +83,21 @@ def getch() -> str:
             return Key.BS
 
         if ch == "\x1b":
-            # 用 select 判断是否有后续字节（区分独立 ESC 与 CSI 序列前缀）
-            if select.select([sys.stdin], [], [], 0.05)[0]:
-                ch2 = sys.stdin.read(1)
+            # select 用 fd 而非 sys.stdin，避免缓冲不一致
+            if select.select([fd], [], [], 0.1)[0]:
+                ch2 = os.read(fd, 1).decode("latin-1")
                 if ch2 == "[":
-                    if select.select([sys.stdin], [], [], 0.05)[0]:
-                        ch3 = sys.stdin.read(1)
+                    if select.select([fd], [], [], 0.1)[0]:
+                        ch3 = os.read(fd, 1).decode("latin-1")
                         if ch3 == "A":
                             return Key.UP
-                        elif ch3 == "B":
+                        if ch3 == "B":
                             return Key.DOWN
-                        elif ch3 == "C":
+                        if ch3 == "C":
                             return Key.RIGHT
-                        elif ch3 == "D":
+                        if ch3 == "D":
                             return Key.LEFT
-                        elif ch3 == "Z":
+                        if ch3 == "Z":
                             return Key.BTAB
                         # 其他 CSI 序列忽略
                         return ""
@@ -114,10 +116,8 @@ def getch() -> str:
 
 
 def _visible_width(text: str) -> int:
-    """计算可见宽度，CJK 全角字符计 2."""
-    # 先剥离 ANSI 转义序列
-    import re
-    plain = re.sub(r"\033\[[0-9;]*m", "", text)
+    """计算可见宽度，CJK 全角字符计 2，剥离 ANSI 序列."""
+    plain = _re.sub(r"\033\[[0-9;]*m", "", text)
     w = 0
     for ch in plain:
         cat = unicodedata.east_asian_width(ch)
@@ -143,6 +143,13 @@ def _erase_above(n: int):
     sys.stdout.flush()
 
 
+# ── 装饰区域配置 ──────────────────────────────────────────
+# 修改以下变量即可全局自定义顶部装饰文字和颜色
+
+BANNER_TEXT  = "Issue Tracker"   # 装饰行标题文字（可含版本号）
+BANNER_COLOR = C.CYAN            # 装饰行主色
+
+
 # ── 显示辅助 ──────────────────────────────────────────────
 
 
@@ -151,20 +158,57 @@ def hr(ch: str = "─", color: str = C.CYAN) -> str:
     return c(ch * _term_width(), color)
 
 
+def banner_line(text: str | None = None, color: str | None = None) -> str:
+    """返回顶部装饰行字符串.
+
+    默认使用全局 BANNER_TEXT / BANNER_COLOR，可传参覆盖。
+    格式: ┄ text ┄┄┄┄┄ (填充至终端宽度，DIM 色调)
+
+    自定义示例:
+        banner_line("My Tool v1.0", C.GREEN)
+    """
+    text  = text  or BANNER_TEXT
+    color = color or BANNER_COLOR
+    w = _term_width()
+    prefix = f"┄ {text} "
+    prefix_w = _visible_width(prefix)
+    fill = max(1, w - prefix_w)
+    line = prefix + "┄" * fill
+    return c(line, color, C.DIM)
+
+
 def title_bar(title: str):
-    """输出带 ━ 线的标题栏."""
+    """输出菜单标题栏.
+
+    格式: ══ title ════════ (CYAN Bold ═ 线 + WHITE Bold 标题)
+    """
     w = _term_width()
     title_text = f" {title} "
     title_w = _visible_width(title_text)
     left = 2
     right = max(1, w - left - title_w)
-    line = "━" * left + title_text + "━" * right
-    print(c(line, C.CYAN))
+    print(c("═" * left, C.CYAN, C.BOLD) + c(title_text, C.WHITE, C.BOLD) + c("═" * right, C.CYAN, C.BOLD))
+
+
+def section_header(title: str):
+    """输出上下 ═══ 框起来的信息展示标题.
+
+    ═══════════════════════
+      title
+    ═══════════════════════
+
+    颜色: ═ 线 CYAN Bold，标题 WHITE Bold
+    """
+    w = _term_width()
+    bar = c("═" * w, C.CYAN, C.BOLD)
+    print(bar)
+    print(c(f"  {title}", C.WHITE, C.BOLD))
+    print(bar)
 
 
 def label(text: str) -> str:
-    """标签着色 (Cyan)."""
-    return c(text, C.CYAN)
+    """标签着色 (Cyan Bold)."""
+    return c(text, C.CYAN, C.BOLD)
 
 
 def value(text: str) -> str:
@@ -217,9 +261,9 @@ def input_line(prompt: str, default: str | None = None) -> str | None:
         EOFError → 返回 None。
     """
     if default is not None:
-        display = "  " + c(prompt, C.CYAN) + " [" + c(default, C.WHITE, C.BOLD) + "]: "
+        display = "  " + c(prompt, C.CYAN, C.BOLD) + " [" + c(default, C.WHITE, C.BOLD) + "]: "
     else:
-        display = "  " + c(prompt, C.CYAN) + ": "
+        display = "  " + c(prompt, C.CYAN, C.BOLD) + ": "
     sys.stdout.write(display)
     sys.stdout.flush()
     try:
@@ -239,6 +283,7 @@ def menu(
     footer: str | None = None,
     separators: set[int] | None = None,
     item_colors: dict[int, str] | None = None,
+    header: list[str] | None = None,
 ) -> int | None:
     """方向键菜单.
 
@@ -248,6 +293,7 @@ def menu(
         footer: 底部提示文字
         separators: 不可选的分隔行索引集合
         item_colors: 指定索引的未选中状态颜色
+        header: title_bar 之前输出的装饰行列表（参与重绘计算）
 
     返回:
         Enter → 选中索引 (int)；Esc/Ctrl+C → None
@@ -275,6 +321,11 @@ def menu(
     def _render() -> int:
         """渲染菜单，返回输出行数."""
         lines = 0
+        # header 装饰行
+        if header:
+            for h in header:
+                print(h)
+                lines += 1
         # title bar
         title_bar(title)
         lines += 1
@@ -284,8 +335,8 @@ def menu(
                 # 分隔行
                 print("  " + dim("─" * (_term_width() - 4)))
             elif i == cursor:
-                # 选中行: ▸ Cyan Bold + 文字 White Bold
-                print("  " + c("▸ ", C.CYAN, C.BOLD) + c(opt, C.WHITE, C.BOLD))
+                # 选中行: ▸ GREEN Bold + 文字 WHITE Bold
+                print("  " + c("▸ ", C.GREEN, C.BOLD) + c(opt, C.WHITE, C.BOLD))
             else:
                 # 未选中行
                 col = colors.get(i, C.GRAY)
@@ -341,8 +392,7 @@ def yes_no(prompt: str, default: bool = True) -> bool | None:
         else:
             yes_part = c("○ 是", C.GREEN)
             no_part  = c("● 否", C.RED, C.BOLD)
-        line = "  " + c(prompt, C.CYAN) + "   " + yes_part + "    " + no_part
-        print(line)
+        print("  " + c(prompt, C.CYAN, C.BOLD) + "   " + yes_part + "    " + no_part)
         return 1
 
     total_lines = _render()
