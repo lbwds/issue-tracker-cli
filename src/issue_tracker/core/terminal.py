@@ -147,15 +147,30 @@ def _erase_above(n: int):
 # 修改以下变量即可全局自定义顶部装饰文字和颜色
 
 BANNER_COLOR = C.CYAN            # 装饰区域主色
+BANNER_MIN_WIDTH = 50            # banner 所需的最小宽度，低于此宽度不展示
 
-# ASCII 艺术字定义 (ISSUE TRACKER)
-_ASCII_ART_ISSUE = [
-    "  ██╗      █████╗ ███████╗██╗   ██╗██╗   ██╗██╗███╗   ███╗",
-    "  ██║     ██╔══██╗╚══███╔╝╚██╗ ██╔╝██║   ██║██║████╗ ████║",
-    "  ██║     ███████║  ███╔╝  ╚████╔╝ ██║   ██║██║██╔████╔██║",
-    "  ██║     ██╔══██║ ███╔╝    ╚██╔╝  ╚██╗ ██╔╝██║██║╚██╔╝██║",
-    "  ███████╗██║  ██║███████╗   ██║    ╚████╔╝ ██║██║ ╚═╝ ██║",
-    "  ╚══════╝╚═╝  ╚═╝╚══════╝   ╚═╝     ╚═══╝  ╚═╝╚═╝     ╚═╝",
+# 方块风 ASCII 艺术字 (ISSUE TRACKER) - 最小宽度 50
+# 每行长度正好 50 字符
+# I: ███  |  S: ████  |  U: ███  |  E: ████
+#    █       █           █       █
+#    ███      ████       █       ████
+#    █           █       █       █
+#    ███      ████       ███     ████
+# T: ████  |  R: ████  |  A: ████  |  C: █████|  K: ███  |  E: ████  |  R: ████
+#    █        █       █   █        █     █        █        █       █
+#    ███      ████    █████      ███    ████    ████      ████    ████
+#    █        █ █        █       █         █        █        █ █        █
+#    █        █  █       █      ███      █  █      ███      █  █       █
+# 行:
+# 0-4: ISSUE (每单词间 2 空格，ISSUE 结尾后 3 空格)
+# 6-10: TRACKER
+_ASCII_ART_BLOCK = [
+    # ISSUE              TRACKER
+    "███ ████ ████ ███ ███   ████ ████  ████ ████  ███  ████ ████",
+    "█     █  █     █  █ █      █   █     █   █     █ █   █  █   █   ",
+    "███  ████  ████ ███ ███    ████ ████ █████   ████ ████ ████ ████",
+    "█  █     █     █ █   █     █   █ █   █     █   █     █ █   █  █ ",
+    "███ ████ ████ ███  ███    █   █  ████ █     ████  █  █ ████ █  █",
 ]
 
 
@@ -186,40 +201,39 @@ def banner_line(text: str | None = None, color: str | None = None) -> str:
 
 
 def banner_block(version: str) -> list[str]:
-    """返回顶部 ASCII 艺术装饰区块（多行）.
+    """返回方块风 ASCII 艺术装饰区块（多行）.
 
     返回格式:
-        ============================================================
-          ██╗      █████╗ ███████╗...  (ASCII 艺术字)
-          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Version: x.x.x
-        ============================================================
+        ███ ████ ████ ███ ███   ████ ████  ████ ...  (ASCII 艺术字)
+        █     █  █     █  █ █      █   █     ...
+        ...
+        Version: x.x.x
+
+    banner 与正文间空一行（通过返回空字符串实现）。
 
     参数:
         version: 版本号字符串，如 "2.2.2"
+
+    如果终端宽度小于 BANNER_MIN_WIDTH，返回空列表（不展示 banner）。
     """
     w = _term_width()
+
+    # 窗口宽度检测
+    if w < BANNER_MIN_WIDTH:
+        return []
+
     lines = []
 
-    # 顶部边框
-    lines.append(c("═" * w, C.CYAN, C.BOLD))
-
     # ASCII 艺术字 (ISSUE TRACKER) - CYAN BOLD
-    for art_line in _ASCII_ART_ISSUE:
+    for art_line in _ASCII_ART_BLOCK:
         lines.append(c(art_line, C.CYAN, C.BOLD))
 
-    # 版本行: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Version: x.x.x
-    version_text = f"Version: {version}"
-    # 计算填充使其居中
-    version_w = _visible_width(version_text)
-    tildes_left = max(2, (w - version_w) // 2 - 1)
-    tildes_right = max(2, w - tildes_left - version_w)
-    version_line = "~" * tildes_left + " " + version_text + " " + "~" * tildes_right
-    # 截断到终端宽度
-    version_line = version_line[:w]
-    lines.append(c(version_line, C.CYAN))
+    # 版本行（左对齐，无装饰字符）
+    version_line = f"  Version: {version}"
+    lines.append(c(version_line, C.WHITE))
 
-    # 底部边框
-    lines.append(c("═" * w, C.CYAN, C.BOLD))
+    # 空行分隔
+    lines.append("")
 
     return lines
 
