@@ -33,7 +33,7 @@ from issue_tracker.core.terminal import (
     C, banner_block, dim, err, input_line, label, menu, ok, section_header,
     value, wait_key, warn, yes_no,
 )
-from issue_tracker.project_init import edit_menu, load_yaml, save_config
+from issue_tracker.project_init import edit_menu, load_yaml, save_config, _sanitize_name
 
 
 def _banner():
@@ -254,7 +254,8 @@ def _project_mgmt_menu():
             print("  " + warn(f"⚠ 项目 [{proj['id']}] 无数据库文件，仅备份配置。"))
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_name = f"{proj['id']}_{proj['name']}_{timestamp}.tar.gz"
+        safe_name = _sanitize_name(proj['name'])
+        backup_name = f"{proj['id']}_{safe_name}_{timestamp}.tar.gz"
         backup_path = os.path.join(get_backups_dir(), backup_name)
 
         with tarfile.open(backup_path, "w:gz") as tar:
@@ -279,14 +280,21 @@ def _project_mgmt_menu():
 
         backup_path = backups[choice]
 
-        # 预览内容
+        # 预览内容（并验证路径安全性）
         print()
         section_header("备份内容预览")
+        unsafe_members = []
         with tarfile.open(backup_path, "r:gz") as tar:
             members = tar.getnames()
             for m in members:
-                dest = get_config_dir() if m.endswith(".yaml") else get_data_dir()
-                print(f"    → {value(os.path.join(dest, m))}")
+                dest_dir = get_config_dir() if m.endswith(".yaml") else get_data_dir()
+                dest_path = os.path.realpath(os.path.join(dest_dir, m))
+                safe_prefix = os.path.realpath(dest_dir) + os.sep
+                if not dest_path.startswith(safe_prefix):
+                    unsafe_members.append(m)
+                    print(f"    {err('✗')} {value(m)} {err('(路径不安全，将跳过)')}")
+                else:
+                    print(f"    → {value(dest_path)}")
         print()
 
         # yes_no 确认
@@ -294,13 +302,18 @@ def _project_mgmt_menu():
         if not confirmed:
             return
 
-        # 执行恢复
+        # 执行恢复（跳过不安全路径）
         with tarfile.open(backup_path, "r:gz") as tar:
             for member in tar.getmembers():
+                # 安全检查：验证路径不会逃逸到目标目录之外
                 dest_dir = get_config_dir() if member.name.endswith(".yaml") else get_data_dir()
+                dest_path = os.path.realpath(os.path.join(dest_dir, member.name))
+                safe_prefix = os.path.realpath(dest_dir) + os.sep
+                if not dest_path.startswith(safe_prefix):
+                    print("  " + err(f"✗ 跳过不安全路径: {member.name}"))
+                    continue
                 f = tar.extractfile(member)
                 if f:
-                    dest_path = os.path.join(dest_dir, member.name)
                     with open(dest_path, "wb") as out:
                         out.write(f.read())
                     print("  " + ok(f"✓ {dest_path}"))
