@@ -147,18 +147,41 @@ def _erase_above(n: int):
 # 修改以下变量即可全局自定义顶部装饰文字和颜色
 
 BANNER_COLOR = C.CYAN            # 装饰区域主色
-BANNER_MIN_WIDTH = 60            # banner 所需的最小宽度，低于此宽度不展示
+BANNER_MIN_WIDTH = 40            # banner 所需的最小宽度，低于此宽度不展示
 
-# 优雅风格的 ASCII 艺术字 (ISSUE TRACKER)
-# 使用 ╔╗║╝█═ 等字符，最小宽度 60
-_ASCII_ART_ELEGANT = [
-    # ISSUE                         TRACKER
-    "██╗      █████╗ ███████╗██╗   ██╗██╗   ██╗██╗███╗   ███╗██████╗ ██████╗ ███████╗   ███╗   ███╗██╗   ██╗██╗███╗   ██╗██╗███╗   ███╗",
-    "██║     ██╔══██╗╚══███╔╝╚██╗ ██╔╝██║   ██║██║████╗ ████║██╔══██╗██╔══██╗██╔════╝   ████╗ ████║██║   ██║██║████╗  ██║██║████╗ ████║",
-    "██║     ███████║  ███╔╝  ╚████╔╝ ██║   ██║██║██╔████╔██║██║  ██║██████╔╝█████╗     ██╔████╔██║██║   ██║██║██╔██╗ ██║██║██╔████╔██║",
-    "██║     ██╔══██║ ███╔╝    ╚██╔╝  ╚██╗ ██╔╝██║██║╚██╔╝██║██║  ██║██╔══██╗██╔══╝     ██║╚██╔╝██║██║   ██║██║██║╚██╗██║██║██║╚██╔╝██║",
-    "███████╗██║  ██║███████╗   ██║    ╚████╔╝ ██║██║ ╚═╝ ██║██████╔╝██████╔╝███████╗   ██║ ╚═╝ ██║╚██████╔╝██║██║ ╚████║██║██║ ╚═╝ ██║",
-    "╚══════╝╚═╝  ╚═╝╚══════╝   ╚═╝     ╚═══╝  ╚═╝╚═╝     ╚═╝╚═════╝ ╚═════╝ ╚══════╝   ╚═╝     ╚═╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚═╝╚═╝     ╚═╝",
+# Logo 颜色定义（基于原 logo 设计）
+# 边框: 深蓝色 #002B5C
+# 感叹号: 浅蓝色 #3498DB
+# 对勾: 亮蓝色 #2E86C1
+C.LOGO_BORDER = "\033[38;5;17m"     # 深蓝色边框
+C.LOGO_EXCLAM = "\033[38;5;39m"     # 浅蓝色感叹号
+C.LOGO_CHECK = "\033[38;5;45m"      # 亮蓝色对勾
+
+# 自定义 Logo ASCII 艺术
+# 圆角边框 + 感叹号(!) + 对勾(✓)
+# 根据 logo 分析：感叹号左侧，对勾右侧
+_ASCII_ART_LOGO = [
+    # 深蓝边框，内部白色背景
+    # 感叹号: │ + ● (浅蓝)
+    # 对勾: ╱ (亮蓝)
+    ("╔══════════════════════════════════════╗", "border"),
+    ("║                                      ║", "border"),
+    ("║  ╷                       ╱           ║", "mixed"),
+    ("║  │ !        ●           ╱            ║", "mixed"),
+    ("║  └                     ╱             ║", "mixed"),
+    ("║                                    ║", "border"),
+    ("╚══════════════════════════════════════╝", "border"),
+]
+
+# 简化版 Logo（单色，用于非 TTY）
+_ASCII_ART_LOGO_SIMPLE = [
+    "╔══════════════════════════════════════╗",
+    "║                                      ║",
+    "║  !                   ╱               ║",
+    "║  ●                  ╱                ║",
+    "║                     ╱                 ║",
+    "║                                      ║",
+    "╚══════════════════════════════════════╝",
 ]
 
 
@@ -189,18 +212,22 @@ def banner_line(text: str | None = None, color: str | None = None) -> str:
 
 
 def banner_block(version: str) -> list[str]:
-    """返回优雅风格 ASCII 艺术装饰区块（多行）.
+    """返回自定义 Logo ASCII 艺术装饰区块（多行）.
 
     返回格式:
-        ██╗      █████╗ ███████╗██╗   ██╗██╗   ██╗██╗███╗   ███╗...  (ASCII 艺术字)
-        ██║     ██╔══██╗╚══███╔╝╚██╗ ██╔╝██║   ██║██║████╗ ████║...
-        ...
-        Version: x.x.x
+        ╔══════════════════════════════════════╗
+        ║                                      ║
+        ║  ╷                       ╱           ║  (Logo: ! + ✓)
+        ║  │ !        ●           ╱            ║
+        ║  └                     ╱             ║
+        ║                                      ║
+        ╚══════════════════════════════════════╝
+           Issue Tracker v2.2.5
 
     banner 与正文间空一行（通过返回空字符串实现）。
 
     参数:
-        version: 版本号字符串，如 "2.2.2"
+        version: 版本号字符串，如 "2.2.5"
 
     如果终端宽度小于 BANNER_MIN_WIDTH，返回空列表（不展示 banner）。
     """
@@ -211,14 +238,40 @@ def banner_block(version: str) -> list[str]:
         return []
 
     lines = []
+    is_tty = sys.stdout.isatty()
 
-    # ASCII 艺术字 (ISSUE TRACKER) - CYAN BOLD
-    for art_line in _ASCII_ART_ELEGANT:
-        lines.append(c(art_line, C.CYAN, C.BOLD))
+    if is_tty:
+        # 带颜色渲染
+        for line, elem_type in _ASCII_ART_LOGO:
+            if elem_type == "border":
+                # 边框使用深蓝色
+                lines.append(c(line, C.LOGO_BORDER, C.BOLD))
+            elif elem_type == "mixed":
+                # 混合元素：分别渲染
+                # 分割: 边框部分 + 感叹号部分 + 对勾部分
+                # ║  ╷                       ╱           ║
+                # 分解为: ║(深蓝) + 空格 + ╷(浅蓝) + 空格 + ╱(亮蓝) + 空格 + ║(深蓝)
+                parts = []
+                for char in line:
+                    if char == "║" or char == "╔" or char == "╗" or char == "╚" or char == "╝" or char == "═":
+                        parts.append(c(char, C.LOGO_BORDER, C.BOLD))
+                    elif char == "╱":
+                        parts.append(c(char, C.LOGO_CHECK, C.BOLD))
+                    elif char in ("╷", "│", "└", "!", "●"):
+                        parts.append(c(char, C.LOGO_EXCLAM, C.BOLD))
+                    else:
+                        parts.append(char)
+                lines.append("".join(parts))
+            else:
+                lines.append(c(line, C.LOGO_BORDER, C.BOLD))
+    else:
+        # 非 TTY 使用简化版
+        for line in _ASCII_ART_LOGO_SIMPLE:
+            lines.append(line)
 
-    # 版本行（左对齐，无装饰字符）
-    version_line = f"  Version: {version}"
-    lines.append(c(version_line, C.WHITE))
+    # 版本行（左对齐，显示 "Issue Tracker vx.x.x"）
+    version_line = f"   Issue Tracker v{version}"
+    lines.append(c(version_line, C.CYAN, C.BOLD) if is_tty else version_line)
 
     # 空行分隔
     lines.append("")
