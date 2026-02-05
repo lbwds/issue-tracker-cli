@@ -26,12 +26,12 @@ pip install issue-tracker-cli
 
 **使用 HTTPS**（推荐）：
 ```bash
-pip install git+https://github.com/lbwds/issue-tracker-cli.git@v2.0.1
+pip install git+https://github.com/lbwds/issue-tracker-cli.git@v2.2.0
 ```
 
 **使用 SSH**（已配置 SSH 密钥）：
 ```bash
-pip install git+ssh://git@github.com/lbwds/issue-tracker-cli.git@v2.0.1
+pip install git+ssh://git@github.com/lbwds/issue-tracker-cli.git@v2.2.0
 ```
 
 ### 开发模式安装
@@ -44,59 +44,38 @@ pip install -e .
 
 ### 安装后的目录结构
 
-首次运行任何命令时，工具会自动创建数据存储目录：
+首次运行任何命令时，工具会自动创建数据存储目录（遵循 [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/latest/)）：
 
+```
+~/.config/issue-tracker/              # $XDG_CONFIG_HOME/issue-tracker  — 项目配置
+~/.local/share/issue-tracker/         # $XDG_DATA_HOME/issue-tracker   — 数据库
+~/.local/share/issue-tracker/exports/ #                                — 导出文件
+~/.local/share/issue-tracker/backups/ #                                — 项目备份
+```
+
+可通过标准 XDG 环境变量自定义位置：
 ```bash
-issue-tracker --help  # 触发目录创建
-```
-
-创建的目录结构：
-```
-~/issue-tracker-cli/          # ISSUE_TRACKER_HOME
-├── .config/                  # 项目配置文件目录
-├── data/                     # SQLite 数据库目录
-└── exports/                  # Markdown 导出目录
-```
-
-可通过环境变量自定义位置：
-```bash
-export ISSUE_TRACKER_HOME=/custom/path
+export XDG_CONFIG_HOME=/custom/config   # 配置目录，默认 ~/.config
+export XDG_DATA_HOME=/custom/data       # 数据目录，默认 ~/.local/share
 ```
 
 ## 快速开始
 
 ### 推荐方式：项目目录配置（无需 `-p` 参数）
 
-在你的项目根目录创建 `config.yaml`：
+在项目根目录运行 `iss-project` 引导创建配置：
 
 ```bash
 cd /path/to/your/project
-
-cat > config.yaml << 'EOF'
-project:
-  id: "001"
-  name: "YourProject"
-
-id_rules:
-  format: "{num:03d}"
-
-priorities: [P0, P1, P2, P3]
-statuses: [pending, in_progress, planned, fixed, n_a]
-
-github:
-  enabled: true
-  close_on_fix: true
-  comment_template: "自动同步: {issue_id} 已修复"
-
-export:
-  output: "exports/issues.md"
-EOF
+iss-project
+# 按提示依次输入: 项目 ID、名称、优先级、状态、GitHub 配置、导出路径
+# 确认后自动写入 issue-tracker.yaml
 ```
 
 然后直接在项目目录中使用命令（无需指定 `-p` 参数）：
 
 ```bash
-# 新增问题
+# 新增问题（编号自动分配）
 issue-tracker add --title "登录功能异常" --priority P0
 
 # 查询问题
@@ -106,7 +85,7 @@ issue-tracker query --status pending
 issue-tracker stats
 ```
 
-**工作原理**：工具会自动查找当前目录下的 `config.yaml`，无需每次指定项目。
+**工作原理**：工具会自动查找当前目录下的 `issue-tracker.yaml`，无需每次指定项目。也可使用 `iss-ui` 打开全局管理菜单，管理多个项目、备份/恢复、GitHub 连接等。
 
 ---
 
@@ -117,12 +96,10 @@ issue-tracker stats
 适合需要管理多个独立项目的场景：
 
 ```bash
-# 设置环境变量（可选，默认: ~/issue-tracker-cli）
-export ISSUE_TRACKER_HOME=$HOME/issue-tracker-cli
-mkdir -p $ISSUE_TRACKER_HOME/.config
+# 配置目录默认为 ~/.config/issue-tracker/，首次运行会自动创建
 
-# 创建项目配置文件
-cat > $ISSUE_TRACKER_HOME/.config/001_ProjectA.yaml << 'EOF'
+# 创建项目配置文件（文件名格式: {project_id}_{name}.yaml）
+cat > ~/.config/issue-tracker/001_ProjectA.yaml << 'EOF'
 project:
   id: "001"
   name: "ProjectA"
@@ -148,11 +125,10 @@ issue-tracker -c /path/to/config.yaml add --title "..." --priority P2
 
 ```
 1. -c <config> 参数         → 直接使用指定路径
-2. -p <project_id> 参数     → 搜索 ISSUE_TRACKER_HOME/.config/{project_id}_*.yaml
+2. -p <project_id> 参数     → 搜索 $XDG_CONFIG_HOME/issue-tracker/{project_id}_*.yaml
 3. (无参数) 自动查找:
-   a) 当前目录/config.yaml   → 推荐方式，适合单项目使用
-   b) .config/ 唯一配置文件  → 多项目时自动使用唯一配置
-   c) git root/config.yaml   → 兼容旧模式
+   a) 当前目录/issue-tracker.yaml         → 推荐方式，适合单项目使用
+   b) $XDG_CONFIG_HOME/issue-tracker/ 唯一配置文件  → 多项目时自动使用唯一配置
 ```
 
 ## 命令概览
@@ -167,6 +143,8 @@ issue-tracker -c /path/to/config.yaml add --title "..." --priority P2
 | `export` | 生成 Markdown | `issue-tracker export` |
 | `sync` | 同步到 GitHub | `issue-tracker sync --dry-run` |
 | `migrate` | 导入数据 | `issue-tracker migrate --source file.md --migrator weldsmart` |
+| `iss-project` | 项目配置引导/编辑 | 在项目目录下运行 |
+| `iss-ui` | 全局管理菜单 | 可在任意目录下运行 |
 
 详见 [使用指导](docs/使用指导.md)。
 
@@ -175,14 +153,19 @@ issue-tracker -c /path/to/config.yaml add --title "..." --priority P2
 ### 目录结构
 
 ```
-~/issue-tracker-cli/              # ISSUE_TRACKER_HOME
-├── .config/                      # 项目配置目录
-│   ├── 001_WeldSmart.yaml        # 项目 001 配置
-│   └── 002_AnotherProject.yaml   # 项目 002 配置
-└── data/                         # 数据库目录
-    ├── 001_WeldSmart_Pro.db      # 项目 001 数据库
-    └── 002_Another_Project.db    # 项目 002 数据库
+~/.config/issue-tracker/              # 项目配置目录
+│   ├── globals.yaml                  # 全局默认配置（由 iss-ui 管理）
+│   ├── 001_WeldSmart.yaml            # 项目 001 配置
+│   └── 002_AnotherProject.yaml       # 项目 002 配置
+
+~/.local/share/issue-tracker/         # 数据目录
+├── 001_WeldSmart_Pro.db              # 项目 001 数据库
+├── 002_Another_Project.db            # 项目 002 数据库
+├── exports/                          # 导出文件
+└── backups/                          # 项目备份 (tar.gz)
 ```
+
+使用 `iss-ui` 可以在交互菜单中查看所有项目、备份与恢复、管理 GitHub 连接等。
 
 ### 项目切换
 
@@ -216,7 +199,7 @@ github:
   comment_template: "自动同步: {issue_id} 已修复"
 
 export:
-  output: "exports/issues.md"    # 导出路径（相对于 ISSUE_TRACKER_HOME）
+  output: "exports/issues.md"    # 导出路径（相对于 $XDG_DATA_HOME/issue-tracker）
 ```
 
 ## 迁移现有数据

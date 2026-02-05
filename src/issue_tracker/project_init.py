@@ -4,10 +4,11 @@
     iss-project          # 在项目目录下运行
 
 行为:
-    - 目录中已有 issue-tracker.yaml → 进入编辑菜单
+    - 目录中已有 issue-tracker.yaml → 进入编辑菜单（Submit/Cancel 模式）
     - 目录中无配置文件              → 引导式创建流程
 """
 
+import copy
 import os
 import re
 import sys
@@ -20,6 +21,9 @@ except ImportError:
 
 from issue_tracker.core.global_config import GlobalConfig
 from issue_tracker.core.paths import CONFIG_FILENAME, ensure_directories
+from issue_tracker.core.terminal import (
+    C, dim, err, input_line, menu, ok, title_bar, value, wait_key, yes_no,
+)
 
 
 # ── 工具函数 ─────────────────────────────────────────────
@@ -28,33 +32,6 @@ from issue_tracker.core.paths import CONFIG_FILENAME, ensure_directories
 def _sanitize_name(name: str) -> str:
     """清理名称用于文件名: 保留字母数字和下划线."""
     return re.sub(r'[^\w]', '_', name).strip('_')
-
-
-def _read_input(prompt: str, default: str = "") -> str:
-    """读取用户输入，显示默认值."""
-    if default:
-        raw = input(f"{prompt} [{default}]: ").strip()
-        return raw if raw else default
-    return input(f"{prompt}: ").strip()
-
-
-def _yes_no(prompt: str, default_yes: bool = False) -> bool:
-    """是/否确认输入."""
-    hint = "[Y/n]" if default_yes else "[y/N]"
-    raw = input(f"{prompt} {hint}: ").strip().lower()
-    if not raw:
-        return default_yes
-    return raw in ("y", "yes")
-
-
-def _edit_list(prompt: str, current: list[str]) -> list[str]:
-    """编辑列表字段（逗号分隔输入）."""
-    raw = _read_input(prompt, ",".join(current))
-    result = [item.strip() for item in raw.split(",") if item.strip()]
-    if not result:
-        print("  ✗ 列表不能为空，保持原值")
-        return current
-    return result
 
 
 # ── YAML 渲染与 IO ───────────────────────────────────────
@@ -123,44 +100,58 @@ def guided_create(config_path: str):
     gc = GlobalConfig()
 
     print()
-    print("=" * 50)
-    print("  Issue Tracker - 新项目引导配置")
-    print("=" * 50)
+    title_bar("Issue Tracker - 新项目引导配置")
     print()
 
     # 项目 ID
     while True:
-        project_id = input("项目 ID (纯数字, 如 001): ").strip()
+        project_id = input_line("项目 ID (纯数字, 如 001)")
         if project_id and project_id.isdigit():
             break
-        print("  ✗ 项目 ID 必须为非空纯数字")
+        print("  " + err("✗ 项目 ID 必须为非空纯数字"))
 
     # 项目名称
     while True:
-        project_name = input("项目名称: ").strip()
+        project_name = input_line("项目名称")
         if project_name:
             break
-        print("  ✗ 项目名称不能为空")
+        print("  " + err("✗ 项目名称不能为空"))
 
-    # 优先级和状态 — 从全局默认值读取
-    priorities = _edit_list("优先级列表", gc.default_priorities)
-    statuses = _edit_list("状态列表", gc.default_statuses)
+    # 优先级列表
+    raw = input_line("优先级列表", ",".join(gc.default_priorities))
+    priorities = [p.strip() for p in (raw or "").split(",") if p.strip()] if raw else gc.default_priorities
+    if not priorities:
+        priorities = gc.default_priorities
+
+    # 状态列表
+    raw = input_line("状态列表", ",".join(gc.default_statuses))
+    statuses = [s.strip() for s in (raw or "").split(",") if s.strip()] if raw else gc.default_statuses
+    if not statuses:
+        statuses = gc.default_statuses
 
     # GitHub
     print()
-    gh_enabled = _yes_no("启用 GitHub 同步?")
+    gh_enabled = yes_no("启用 GitHub 同步?", default=False)
+    if gh_enabled is None:
+        gh_enabled = False
+
     gh: dict = {"enabled": gh_enabled, "close_on_fix": False, "comment_template": gc.default_github_comment_template}
     if gh_enabled:
-        gh["close_on_fix"] = _yes_no("  修复时自动关闭 Issue?", default_yes=True)
-        gh["comment_template"] = _read_input("  关闭评论模板", gc.default_github_comment_template)
-        repo = input("  绑定 GitHub 仓库 (owner/name, 可空): ").strip()
+        close = yes_no("修复时自动关闭 Issue?", default=True)
+        gh["close_on_fix"] = close if close is not None else True
+        template = input_line("关闭评论模板", gc.default_github_comment_template)
+        if template:
+            gh["comment_template"] = template
+        repo = input_line("绑定 GitHub 仓库 (owner/name, 可空)")
         if repo:
             gh["repo"] = repo
 
     # 导出
     print()
     default_export = f"exports/{_sanitize_name(project_name).lower()}_issues.md"
-    export_output = _read_input("导出文件名", default_export)
+    export_output = input_line("导出文件名", default_export)
+    if not export_output:
+        export_output = default_export
 
     # 构建配置
     config_data: dict = {
@@ -171,136 +162,199 @@ def guided_create(config_path: str):
         "export": {"output": export_output},
     }
 
-    # 预览
-    print()
-    print("-" * 50)
-    print("  配置预览")
-    print("-" * 50)
-    print(render_yaml(config_data))
-    print(f"写入路径: {config_path}")
+    # 末尾三项 menu: 查看预览 / 提交创建 / 取消
+    IDX_PREVIEW = 0
+    IDX_SUBMIT  = 1
+    IDX_CANCEL  = 2
 
-    if os.path.isfile(config_path):
-        print("\n  ⚠ 文件已存在，将被覆盖")
+    while True:
+        choice = menu(
+            "新项目配置",
+            ["查看预览", f"{ok('✓ 提交创建')}", f"{err('✗ 取消')}"],
+            footer="↑↓ 选择  Enter 确认  Esc 取消",
+            item_colors={IDX_SUBMIT: C.GREEN, IDX_CANCEL: C.RED},
+        )
 
-    if not _yes_no("\n确认写入?"):
-        print("已取消。")
-        return
+        if choice is None or choice == IDX_CANCEL:
+            print("  " + dim("已取消。"))
+            return
 
-    save_config(config_path, config_data)
-    print()
-    print(f"✓ 已创建: {config_path}")
-    print(f"  验证: issue-tracker stats")
+        if choice == IDX_PREVIEW:
+            print()
+            title_bar("配置预览")
+            print(render_yaml(config_data))
+            print(f"  {dim('写入路径:')} {value(config_path)}")
+            if os.path.isfile(config_path):
+                print("  " + err("⚠ 文件已存在，将被覆盖"))
+            print()
+            wait_key()
+            continue
+
+        if choice == IDX_SUBMIT:
+            save_config(config_path, config_data)
+            print("  " + ok(f"✓ 已创建: {config_path}"))
+            print(f"  {dim('验证: issue-tracker stats')}")
+            return
 
 
-# ── 编辑菜单 ─────────────────────────────────────────────
+# ── 编辑菜单 (Submit/Cancel) ─────────────────────────────
 
 
 def edit_menu(config_path: str, data: dict):
-    """编辑已有项目配置的菜单."""
+    """编辑已有项目配置的菜单（Submit/Cancel 模式）."""
+    original = copy.deepcopy(data)
+    working  = copy.deepcopy(data)
+
+    # 菜单索引常量
+    IDX_VIEW       = 0
+    IDX_PROJ_INFO  = 1
+    IDX_PRIORITIES = 2
+    IDX_STATUSES   = 3
+    IDX_GITHUB     = 4
+    IDX_EXPORT     = 5
+    IDX_SEP        = 6
+    IDX_SUBMIT     = 7
+    IDX_CANCEL     = 8
+
     while True:
-        proj = data.get("project", {})
-        print()
-        print("=" * 50)
-        print(f"  项目配置编辑 — {proj.get('name', '?')} ({proj.get('id', '?')})")
-        print("=" * 50)
-        print("  1) 查看当前配置")
-        print("  2) 编辑项目信息（ID / 名称）")
-        print("  3) 编辑优先级列表")
-        print("  4) 编辑状态列表")
-        print("  5) 编辑 GitHub 配置")
-        print("  6) 编辑导出配置")
-        print("  0) 退出")
+        dirty = working != original
+        proj  = working.get("project", {})
+        title = f"项目配置编辑 — {proj.get('name', '?')} ({proj.get('id', '?')})" + (" ●" if dirty else "")
 
-        choice = input("\n请选择: ").strip()
-        if choice == "0":
+        gh_label = "开启" if working.get("github", {}).get("enabled") else "关闭"
+
+        options = [
+            "查看当前配置",
+            f"项目信息: {value(proj.get('name', '?'))} / {value(proj.get('id', '?'))}",
+            f"优先级: {value(','.join(working.get('priorities', [])))}",
+            f"状态: {value(','.join(working.get('statuses', [])))}",
+            f"GitHub: {value(gh_label)}",
+            f"导出路径: {value(working.get('export', {}).get('output', 'exports/issues.md'))}",
+            "",  # separator
+            f"{ok('✓ 提交保存')}",
+            f"{err('✗ 取消')}",
+        ]
+
+        choice = menu(
+            title, options,
+            footer="↑↓ 选择  Enter 确认  Esc 返回",
+            separators={IDX_SEP},
+            item_colors={IDX_SUBMIT: C.GREEN, IDX_CANCEL: C.RED},
+        )
+
+        if choice is None or choice == IDX_CANCEL:
             return
-        elif choice == "1":
+
+        if choice == IDX_SUBMIT:
+            save_config(config_path, working)
+            print("  " + ok("✓ 已保存"))
+            wait_key()
+            return
+
+        if choice == IDX_VIEW:
             print()
-            print(render_yaml(data))
-        elif choice == "2":
-            _edit_project_info(config_path, data)
-        elif choice == "3":
-            data["priorities"] = _edit_list("优先级列表", data.get("priorities", []))
-            save_config(config_path, data)
-            print("  ✓ 已保存")
-        elif choice == "4":
-            data["statuses"] = _edit_list("状态列表", data.get("statuses", []))
-            save_config(config_path, data)
-            print("  ✓ 已保存")
-        elif choice == "5":
-            _edit_github(config_path, data)
-        elif choice == "6":
-            _edit_export(config_path, data)
-        else:
-            print("  无效选择")
+            title_bar("当前配置")
+            print(render_yaml(working))
+            wait_key()
+        elif choice == IDX_PROJ_INFO:
+            _edit_project_info(working)
+        elif choice == IDX_PRIORITIES:
+            raw = input_line("优先级列表", ",".join(working.get("priorities", [])))
+            if raw is not None:
+                new = [p.strip() for p in raw.split(",") if p.strip()]
+                if new:
+                    working["priorities"] = new
+                else:
+                    print("  " + err("✗ 列表不能为空"))
+                    wait_key()
+        elif choice == IDX_STATUSES:
+            raw = input_line("状态列表", ",".join(working.get("statuses", [])))
+            if raw is not None:
+                new = [s.strip() for s in raw.split(",") if s.strip()]
+                if new:
+                    working["statuses"] = new
+                else:
+                    print("  " + err("✗ 列表不能为空"))
+                    wait_key()
+        elif choice == IDX_GITHUB:
+            _edit_github(working)
+        elif choice == IDX_EXPORT:
+            _edit_export(working)
 
 
-def _edit_project_info(config_path: str, data: dict):
-    """编辑项目 ID 和名称."""
+def _edit_project_info(data: dict):
+    """编辑项目 ID 和名称（仅修改传入的 working copy，不写盘）."""
     proj = data.setdefault("project", {})
     while True:
-        new_id = _read_input("项目 ID", proj.get("id", ""))
+        new_id = input_line("项目 ID", proj.get("id", ""))
+        if new_id is None:
+            return
         if new_id and new_id.isdigit():
             break
-        print("  ✗ 项目 ID 必须为非空纯数字")
+        print("  " + err("✗ 项目 ID 必须为非空纯数字"))
+
     while True:
-        new_name = _read_input("项目名称", proj.get("name", ""))
+        new_name = input_line("项目名称", proj.get("name", ""))
+        if new_name is None:
+            return
         if new_name:
             break
-        print("  ✗ 项目名称不能为空")
+        print("  " + err("✗ 项目名称不能为空"))
+
     proj["id"] = new_id
     proj["name"] = new_name
-    save_config(config_path, data)
-    print("  ✓ 已保存")
 
 
-def _edit_github(config_path: str, data: dict):
-    """GitHub 配置子菜单."""
+def _edit_github(data: dict):
+    """GitHub 配置子菜单（仅修改传入的 dict，不写盘）."""
     gh = data.setdefault("github", {})
+
     while True:
-        print()
-        print("  — GitHub 配置 —")
-        print(f"    enabled:   {'true' if gh.get('enabled') else 'false'}")
-        print(f"    repo:      {gh.get('repo', '(未绑定)')}")
-        print(f"    close:     {'true' if gh.get('close_on_fix') else 'false'}")
-        print(f"    模板:      {gh.get('comment_template', '(未设置)')}")
-        print("  1) 开启/关闭同步")
-        print("  2) 编辑绑定仓库")
-        print("  3) 开启/关闭修复时自动关闭")
-        print("  4) 编辑评论模板")
-        print("  0) 返回")
+        enabled_label  = "开启" if gh.get("enabled") else "关闭"
+        close_label    = "开启" if gh.get("close_on_fix") else "关闭"
+        repo_label     = gh.get("repo", "(未绑定)")
+        template_label = gh.get("comment_template", "(未设置)")
 
-        choice = input("\n  请选择: ").strip()
-        if choice == "0":
+        options = [
+            f"[{enabled_label}] GitHub 同步",
+            f"[{close_label}] 修复时自动关闭",
+            f"绑定仓库: {value(repo_label)}",
+            f"评论模板: {value(template_label)}",
+        ]
+
+        choice = menu(
+            "GitHub 配置",
+            options,
+            footer="↑↓ 选择  Enter 确认  Esc 返回",
+        )
+
+        if choice is None:
             return
-        elif choice == "1":
+
+        if choice == 0:
             gh["enabled"] = not gh.get("enabled", False)
-        elif choice == "2":
-            repo = input("  GitHub 仓库 (owner/name, 空清除): ").strip()
-            if repo:
-                gh["repo"] = repo
-            elif "repo" in gh:
-                del gh["repo"]
-        elif choice == "3":
+        elif choice == 1:
             gh["close_on_fix"] = not gh.get("close_on_fix", False)
-        elif choice == "4":
+        elif choice == 2:
+            repo = input_line("GitHub 仓库 (owner/name, 空清除)", gh.get("repo", ""))
+            if repo is not None:
+                if repo:
+                    gh["repo"] = repo
+                elif "repo" in gh:
+                    del gh["repo"]
+        elif choice == 3:
             gc = GlobalConfig()
-            gh["comment_template"] = _read_input(
-                "  评论模板", gh.get("comment_template", gc.default_github_comment_template)
-            )
-        else:
-            print("  无效选择")
-            continue
-        save_config(config_path, data)
-        print("  ✓ 已保存")
+            template = input_line("评论模板", gh.get("comment_template", gc.default_github_comment_template))
+            if template is not None:
+                gh["comment_template"] = template
 
 
-def _edit_export(config_path: str, data: dict):
-    """编辑导出配置."""
+def _edit_export(data: dict):
+    """编辑导出配置（仅修改传入的 dict，不写盘）."""
     export = data.setdefault("export", {})
-    export["output"] = _read_input("导出文件名", export.get("output", "exports/issues.md"))
-    save_config(config_path, data)
-    print("  ✓ 已保存")
+    output = input_line("导出文件名", export.get("output", "exports/issues.md"))
+    if output is not None:
+        export["output"] = output
 
 
 # ── 入口 ────────────────────────────────────────────────
@@ -311,11 +365,15 @@ def main_project():
     ensure_directories()
 
     config_path = os.path.join(os.getcwd(), CONFIG_FILENAME)
-    if os.path.isfile(config_path):
-        data = load_yaml(config_path)
-        if data is None:
-            print(f"错误: 无法解析 {config_path}", file=sys.stderr)
-            sys.exit(1)
-        edit_menu(config_path, data)
-    else:
-        guided_create(config_path)
+    try:
+        if os.path.isfile(config_path):
+            data = load_yaml(config_path)
+            if data is None:
+                print(f"错误: 无法解析 {config_path}", file=sys.stderr)
+                sys.exit(1)
+            edit_menu(config_path, data)
+        else:
+            guided_create(config_path)
+    except KeyboardInterrupt:
+        print()
+        print("  " + dim("已取消。"))

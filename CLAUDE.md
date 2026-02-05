@@ -36,7 +36,10 @@ issue-tracker -p 002 query --status pending
 ~/.local/share/issue-tracker/     # $XDG_DATA_HOME/issue-tracker
 ├── 001_WeldSmart_Pro.db          # 项目 001 数据库
 ├── 002_Another_Project.db        # 项目 002 数据库
-└── exports/                      # 导出文件目录
+├── exports/                      # 导出文件目录
+└── backups/                      # 项目备份 (tar.gz)
+
+<项目目录>/issue-tracker.yaml     # 项目本地配置（配置查找优先级最高）
 ```
 
 ### 编号规则
@@ -84,15 +87,22 @@ python3 src/issue_tracker/cli.py <命令>
 ### 目录结构
 ```
 src/issue_tracker/
+├── __init__.py
+├── __version__.py          # 版本信息
 ├── cli.py                  # CLI 入口（参数解析、命令分发）
+├── ui.py                   # iss-ui 全局管理菜单
+├── project_init.py         # iss-project 引导创建与编辑项目配置
 ├── core/
-│   ├── model.py           # Issue 数据类
-│   ├── config.py          # 配置加载与校验
-│   ├── database.py        # SQLite CRUD 封装
-│   ├── exporter.py        # Markdown 导出器
-│   └── github_sync.py     # GitHub 同步 (gh CLI)
+│   ├── __init__.py
+│   ├── model.py            # Issue 数据类
+│   ├── config.py           # 配置加载与校验
+│   ├── database.py         # SQLite CRUD 封装
+│   ├── exporter.py         # Markdown 导出器
+│   ├── github_sync.py      # GitHub 同步 (gh CLI)
+│   ├── global_config.py    # 全局配置管理 (globals.yaml)
+│   └── paths.py            # XDG 路径解析与目录管理
 └── migrators/
-    ├── __init__.py        # BaseMigrator 抽象基类
+    ├── __init__.py         # BaseMigrator 抽象基类
     └── weldsmart_migrator.py  # WeldSmart 格式解析器
 ```
 
@@ -164,6 +174,8 @@ export:
 | `export` | 生成 Markdown | `issue-tracker export` |
 | `sync` | 同步到 GitHub | `issue-tracker sync --dry-run` |
 | `migrate` | 导入数据 | `issue-tracker migrate --source file.md --migrator weldsmart` |
+| `iss-project` | 项目配置引导/编辑 | 在项目目录下运行 |
+| `iss-ui` | 全局管理菜单 | 可在任意目录下运行 |
 
 ### 项目切换
 
@@ -203,3 +215,4 @@ class BaseMigrator(ABC):
 
 - 技术设计: `docs/技术设计方案.md` - 完整架构设计
 - 用户手册: `docs/使用指导.md` - 详细使用说明
+- UI 设计: `docs/UI交互设计.md` - iss-ui / iss-project 交互层设计规范（配色、方向键菜单、Submit/Cancel）
