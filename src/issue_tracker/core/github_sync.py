@@ -53,12 +53,16 @@ class GithubSync:
             print(f"  {issue.id} → GitHub Issue #{gh_id} (标题: {issue.title})")
 
             if dry_run:
-                print(f"    [dry-run] 将执行: gh issue close {gh_id} --comment \"{comment}\"")
+                repo = self._config.github_repo
+                repo_arg = f" --repo {repo}" if repo else ""
+                print(f"    [dry-run] 将执行: gh issue close {gh_id} --comment \"{comment}\"{repo_arg}")
                 result["details"].append({"issue_id": issue.id, "action": "dry-run"})
                 continue
 
             # 实际执行 gh 命令
-            success, error_msg = self._close_github_issue(gh_id, comment)
+            success, error_msg = self._close_github_issue(
+                gh_id, comment, self._config.github_repo
+            )
 
             if success:
                 self._db.log_github_sync(issue.id, gh_id, "close", "success")
@@ -76,19 +80,25 @@ class GithubSync:
         return result
 
     @staticmethod
-    def _close_github_issue(github_issue_id: int, comment: str) -> tuple[bool, str | None]:
+    def _close_github_issue(
+        github_issue_id: int, comment: str, repo: str | None = None
+    ) -> tuple[bool, str | None]:
         """调用 gh CLI 关闭 GitHub Issue.
 
         Args:
             github_issue_id: GitHub Issue 编号
             comment: 关闭时附加的评论
+            repo: GitHub 仓库 (owner/name 格式)，若不指定则使用当前目录仓库
 
         Returns:
             (成功标志, 错误信息)
         """
         try:
+            cmd = ["gh", "issue", "close", str(github_issue_id), "--comment", comment]
+            if repo:
+                cmd.extend(["--repo", repo])
             subprocess.run(
-                ["gh", "issue", "close", str(github_issue_id), "--comment", comment],
+                cmd,
                 check=True,
                 capture_output=True,
                 text=True,

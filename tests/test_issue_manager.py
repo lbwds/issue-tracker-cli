@@ -758,7 +758,7 @@ class TestGithubSync(unittest.TestCase):
 
         self.assertEqual(result["success"], 1)
         self.assertEqual(result["failed"], 0)
-        mock_close.assert_called_once_with(42, "自动同步: 001 已修复")
+        mock_close.assert_called_once_with(42, "自动同步: 001 已修复", None)
 
         # 再次同步应无待处理（已记录日志）
         result2 = syncer.sync(dry_run=True)

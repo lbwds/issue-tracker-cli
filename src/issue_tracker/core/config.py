@@ -72,6 +72,11 @@ class Config:
         return self._raw.get("github", {}).get("comment_template", "已修复: {issue_id}")
 
     @property
+    def github_repo(self) -> str | None:
+        """获取绑定的 GitHub 仓库 (owner/name 格式)."""
+        return self._raw.get("github", {}).get("repo")
+
+    @property
     def export_output(self) -> str:
         return self._raw.get("export", {}).get("output", "issues.md")
 
