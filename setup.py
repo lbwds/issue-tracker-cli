@@ -44,6 +44,8 @@ setup(
     entry_points={
         "console_scripts": [
             "issue-tracker=issue_tracker.cli:main",
+            "iss-project=issue_tracker.project_init:main_project",
+            "iss-ui=issue_tracker.ui:main_ui",
         ],
     },
     python_requires=">=3.10",

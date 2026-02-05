@@ -2,7 +2,7 @@
 """Issue Tracker CLI 入口.
 
 通用开发工具，支持多项目独立运行。
-通过 -p project_id 切换项目，项目配置和数据库存储在 ISSUE_TRACKER_HOME 下。
+通过 -p project_id 切换项目，配置和数据分别按 XDG Base Directory Specification 存储。
 
 支持两种使用方式:
 1. pip install: issue-tracker ...
@@ -34,6 +34,7 @@ try:
     from issue_tracker.core.database import Database
     from issue_tracker.core.exporter import Exporter
     from issue_tracker.core.github_sync import GithubSync
+    from issue_tracker.core.paths import get_config_dir as _get_config_dir, get_data_dir as _get_data_dir, ensure_directories, find_config_in_dir, CONFIG_FILENAME
     from issue_tracker.migrators.weldsmart_migrator import WeldSmartMigrator
 except ImportError:
     # 本地开发模式: 添加 src 到路径后导入
@@ -46,36 +47,10 @@ except ImportError:
     from issue_tracker.core.exporter import Exporter
     from issue_tracker.core.github_sync import GithubSync
     from issue_tracker.migrators.weldsmart_migrator import WeldSmartMigrator
+    from issue_tracker.core.paths import get_config_dir as _get_config_dir, get_data_dir as _get_data_dir, ensure_directories, find_config_in_dir, CONFIG_FILENAME
 
 
-# ── 路径解析 ─────────────────────────────────────────────────────────────────
-
-
-def _get_tracker_home() -> str:
-    """获取 issue-tracker 主目录.
-
-    优先级: ISSUE_TRACKER_HOME 环境变量 > ~/issue-tracker-cli/
-    """
-    return os.environ.get("ISSUE_TRACKER_HOME", os.path.expanduser("~/issue-tracker-cli"))
-
-
-def ensure_directories() -> None:
-    """确保必要的目录存在.
-
-    创建 ISSUE_TRACKER_HOME 及其子目录:
-    - .config/  : 项目配置文件目录
-    - data/     : 数据库文件目录
-    - exports/  : 导出文件目录
-    """
-    home = _get_tracker_home()
-    dirs = [
-        home,
-        os.path.join(home, ".config"),
-        os.path.join(home, "data"),
-        os.path.join(home, "exports"),
-    ]
-    for d in dirs:
-        os.makedirs(d, exist_ok=True)
+# ── 工具函数 ─────────────────────────────────────────────────────────────────
 
 
 def _sanitize_name(name: str) -> str:
@@ -85,13 +60,13 @@ def _sanitize_name(name: str) -> str:
 
 
 def _find_project_config(project_id: str) -> str:
-    """根据 project_id 在 ISSUE_TRACKER_HOME/.config/ 中查找配置文件.
+    """根据 project_id 在 $XDG_CONFIG_HOME/issue-tracker/ 中查找配置文件.
 
     匹配规则: {project_id}_*.yaml
     """
     import glob as glob_mod
 
-    config_dir = os.path.join(_get_tracker_home(), ".config")
+    config_dir = _get_config_dir()
 
     pattern = os.path.join(config_dir, f"{project_id}_*.yaml")
     matches = glob_mod.glob(pattern)
@@ -115,9 +90,9 @@ def _get_default_config() -> str:
     """查找默认配置文件.
 
     查找优先级:
-    1. 当前目录的 config.yaml
-    2. ISSUE_TRACKER_HOME/.config/ 中唯一的配置文件（仅一个项目时自动使用）
-    3. git root 目录的 config.yaml (兼容旧模式)
+    1. 当前目录的 issue-tracker.yaml
+    2. $XDG_CONFIG_HOME/issue-tracker/ 中唯一的项目配置（仅一个项目时自动使用）
+    3. git root 目录的 issue-tracker.yaml
 
     Returns:
         找到的配置文件路径
@@ -126,14 +101,15 @@ def _get_default_config() -> str:
     import glob as glob_mod
 
     # 1. 当前目录
-    current_config = os.path.join(os.getcwd(), "config.yaml")
-    if os.path.isfile(current_config):
-        return current_config
+    cwd_config = find_config_in_dir(os.getcwd())
+    if cwd_config:
+        return cwd_config
 
-    # 2. ISSUE_TRACKER_HOME/.config/ 中唯一配置
-    config_dir = os.path.join(_get_tracker_home(), ".config")
+    # 2. XDG 配置目录中唯一项目配置（排除 globals.yaml）
+    config_dir = _get_config_dir()
     if os.path.isdir(config_dir):
-        configs = glob_mod.glob(os.path.join(config_dir, "*.yaml"))
+        configs = [c for c in glob_mod.glob(os.path.join(config_dir, "*.yaml"))
+                   if os.path.basename(c) != "globals.yaml"]
         if len(configs) == 1:
             return configs[0]
 
@@ -144,24 +120,22 @@ def _get_default_config() -> str:
             capture_output=True, text=True, check=True,
         )
         git_root = result.stdout.strip()
-        git_config = os.path.join(git_root, "config.yaml")
-        if os.path.isfile(git_config):
+        git_config = find_config_in_dir(git_root)
+        if git_config:
             return git_config
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
 
-    # 回退: 返回当前目录下的 config.yaml（即使不存在，后续会报错）
-    return current_config
+    # 回退: 返回当前目录下的 issue-tracker.yaml（即使不存在，后续会报错）
+    return os.path.join(os.getcwd(), CONFIG_FILENAME)
 
 
 def _resolve_db_path(config: Config) -> str:
     """解析数据库路径.
 
-    路径: ISSUE_TRACKER_HOME/data/{project_id}_{project_name}.db
-    自动创建 data/ 目录。
+    路径: $XDG_DATA_HOME/issue-tracker/{project_id}_{project_name}.db
     """
-    home = _get_tracker_home()
-    data_dir = os.path.join(home, "data")
+    data_dir = _get_data_dir()
     os.makedirs(data_dir, exist_ok=True)
     db_name = f"{config.project_id}_{_sanitize_name(config.project_name)}.db"
     return os.path.join(data_dir, db_name)
@@ -372,8 +346,8 @@ def cmd_export(args, config: Config, db: Database):
     if args.output:
         output = args.output
     else:
-        # export.output 相对于 ISSUE_TRACKER_HOME
-        output = os.path.join(_get_tracker_home(), config.export_output)
+        # export.output 相对于 XDG 数据目录
+        output = os.path.join(_get_data_dir(), config.export_output)
     path = exporter.export(output)
     print(f"已导出至: {path}")
 
@@ -599,7 +573,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Issue Tracker CLI - 通用开发工具（支持多项目）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("-p", "--project", help="项目ID（纯数字），从 ISSUE_TRACKER_HOME/.config/ 查找配置")
+    parser.add_argument("-p", "--project", help="项目ID（纯数字），从 $XDG_CONFIG_HOME/issue-tracker/ 查找配置")
     parser.add_argument("-c", "--config", default=None, help="手动指定配置文件路径")
 
     subparsers = parser.add_subparsers(dest="command", help="命令")

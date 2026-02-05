@@ -26,16 +26,17 @@ issue-tracker -p 001 stats
 issue-tracker -p 002 query --status pending
 ```
 
-### 目录结构
+### 目录结构（XDG Base Directory Specification）
 
 ```
-~/issue-tracker-cli/              # ISSUE_TRACKER_HOME
-├── .config/                      # 项目配置目录
+~/.config/issue-tracker/          # $XDG_CONFIG_HOME/issue-tracker
 │   ├── 001_WeldSmart.yaml        # 项目 001 配置
 │   └── 002_AnotherProject.yaml   # 项目 002 配置
-└── data/                         # 数据库目录
-    ├── 001_WeldSmart_Pro.db      # 项目 001 数据库
-    └── 002_Another_Project.db    # 项目 002 数据库
+
+~/.local/share/issue-tracker/     # $XDG_DATA_HOME/issue-tracker
+├── 001_WeldSmart_Pro.db          # 项目 001 数据库
+├── 002_Another_Project.db        # 项目 002 数据库
+└── exports/                      # 导出文件目录
 ```
 
 ### 编号规则
@@ -146,7 +147,7 @@ github:
   comment_template: "自动同步: {issue_id} 已修复"
 
 export:
-  output: "exports/issues.md"    # 相对于 ISSUE_TRACKER_HOME
+  output: "exports/issues.md"    # 相对于 $XDG_DATA_HOME/issue-tracker
 ```
 
 ---
@@ -187,9 +188,14 @@ class BaseMigrator(ABC):
 
 ## 环境变量
 
+遵循 [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/latest/)。
+
 | 环境变量 | 说明 | 默认值 |
 |---------|------|--------|
-| `ISSUE_TRACKER_HOME` | 主目录路径 | `~/issue-tracker-cli` |
+| `XDG_CONFIG_HOME` | 配置文件目录 | `~/.config` |
+| `XDG_DATA_HOME` | 数据存储目录 | `~/.local/share` |
+
+工具在两者下分别创建 `issue-tracker/` 子目录。
 
 ---
 

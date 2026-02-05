@@ -1,19 +1,12 @@
 project:
+  id: "001"
   name: "WeldSmart Pro"
-  db_path: "docs/project/issues.db" # 相对于 git root
 
 # 编号规则
 id_rules:
-  format: "{prefix}-{num:03d}" # 编号格式模板
-  prefixes: # 前缀 → 优先级映射
-    C: { priority: P0, label: "Critical" }
-    H: { priority: P1, label: "High" }
-    M: { priority: P2, label: "Medium" }
-    L: { priority: P3, label: "Low" }
-    A: { priority: P2, label: "Architecture" }
-    T: { priority: P3, label: "Test" }
+  format: "{num:03d}"  # 全局自动递增序号
 
-priorities: [P0, P1, P2, P3] # 有序，高→低
+priorities: [P0, P1, P2, P3]  # 有序，高→低
 
 statuses: [pending, in_progress, planned, fixed, n_a]
 
@@ -23,4 +16,4 @@ github:
   comment_template: "自动同步: {issue_id} 已修复"
 
 export:
-  output: "docs/project/issues.md" # 默认输出路径
+  output: "exports/weldsmart_issues.md"  # 相对于 ISSUE_TRACKER_HOME
