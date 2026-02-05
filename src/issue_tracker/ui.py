@@ -30,7 +30,7 @@ from issue_tracker.core.paths import (
     get_data_dir,
 )
 from issue_tracker.core.terminal import (
-    C, banner_line, dim, err, input_line, label, menu, ok, section_header,
+    C, banner_block, dim, err, input_line, label, menu, ok, section_header,
     value, wait_key, warn, yes_no,
 )
 from issue_tracker.project_init import edit_menu, load_yaml, save_config
@@ -38,7 +38,7 @@ from issue_tracker.project_init import edit_menu, load_yaml, save_config
 
 def _banner():
     """返回当前版本的装饰行列表（作为 menu header 传入）."""
-    return [banner_line(f"Issue Tracker v{__version__}")]
+    return banner_block(__version__)
 
 
 # ── 查看当前路径 ─────────────────────────────────────────

@@ -146,8 +146,17 @@ def _erase_above(n: int):
 # ── 装饰区域配置 ──────────────────────────────────────────
 # 修改以下变量即可全局自定义顶部装饰文字和颜色
 
-BANNER_TEXT  = "Issue Tracker"   # 装饰行标题文字（可含版本号）
-BANNER_COLOR = C.CYAN            # 装饰行主色
+BANNER_COLOR = C.CYAN            # 装饰区域主色
+
+# ASCII 艺术字定义 (ISSUE TRACKER)
+_ASCII_ART_ISSUE = [
+    "  ██╗      █████╗ ███████╗██╗   ██╗██╗   ██╗██╗███╗   ███╗",
+    "  ██║     ██╔══██╗╚══███╔╝╚██╗ ██╔╝██║   ██║██║████╗ ████║",
+    "  ██║     ███████║  ███╔╝  ╚████╔╝ ██║   ██║██║██╔████╔██║",
+    "  ██║     ██╔══██║ ███╔╝    ╚██╔╝  ╚██╗ ██╔╝██║██║╚██╔╝██║",
+    "  ███████╗██║  ██║███████╗   ██║    ╚████╔╝ ██║██║ ╚═╝ ██║",
+    "  ╚══════╝╚═╝  ╚═╝╚══════╝   ╚═╝     ╚═══╝  ╚═╝╚═╝     ╚═╝",
+]
 
 
 # ── 显示辅助 ──────────────────────────────────────────────
@@ -159,15 +168,14 @@ def hr(ch: str = "─", color: str = C.CYAN) -> str:
 
 
 def banner_line(text: str | None = None, color: str | None = None) -> str:
-    """返回顶部装饰行字符串.
+    """返回单行装饰字符串（兼容旧接口）.
 
-    默认使用全局 BANNER_TEXT / BANNER_COLOR，可传参覆盖。
     格式: ┄ text ┄┄┄┄┄ (填充至终端宽度，DIM 色调)
 
     自定义示例:
         banner_line("My Tool v1.0", C.GREEN)
     """
-    text  = text  or BANNER_TEXT
+    text  = text  or "Issue Tracker"
     color = color or BANNER_COLOR
     w = _term_width()
     prefix = f"┄ {text} "
@@ -175,6 +183,45 @@ def banner_line(text: str | None = None, color: str | None = None) -> str:
     fill = max(1, w - prefix_w)
     line = prefix + "┄" * fill
     return c(line, color, C.DIM)
+
+
+def banner_block(version: str) -> list[str]:
+    """返回顶部 ASCII 艺术装饰区块（多行）.
+
+    返回格式:
+        ============================================================
+          ██╗      █████╗ ███████╗...  (ASCII 艺术字)
+          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Version: x.x.x
+        ============================================================
+
+    参数:
+        version: 版本号字符串，如 "2.2.2"
+    """
+    w = _term_width()
+    lines = []
+
+    # 顶部边框
+    lines.append(c("═" * w, C.CYAN, C.BOLD))
+
+    # ASCII 艺术字 (ISSUE TRACKER) - CYAN BOLD
+    for art_line in _ASCII_ART_ISSUE:
+        lines.append(c(art_line, C.CYAN, C.BOLD))
+
+    # 版本行: ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Version: x.x.x
+    version_text = f"Version: {version}"
+    # 计算填充使其居中
+    version_w = _visible_width(version_text)
+    tildes_left = max(2, (w - version_w) // 2 - 1)
+    tildes_right = max(2, w - tildes_left - version_w)
+    version_line = "~" * tildes_left + " " + version_text + " " + "~" * tildes_right
+    # 截断到终端宽度
+    version_line = version_line[:w]
+    lines.append(c(version_line, C.CYAN))
+
+    # 底部边框
+    lines.append(c("═" * w, C.CYAN, C.BOLD))
+
+    return lines
 
 
 def title_bar(title: str):

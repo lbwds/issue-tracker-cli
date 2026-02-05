@@ -23,14 +23,14 @@ from issue_tracker.__version__ import __version__
 from issue_tracker.core.global_config import GlobalConfig
 from issue_tracker.core.paths import CONFIG_FILENAME, ensure_directories
 from issue_tracker.core.terminal import (
-    C, banner_line, dim, err, input_line, menu, ok, section_header, value,
+    C, banner_block, dim, err, input_line, menu, ok, section_header, value,
     wait_key, yes_no,
 )
 
 
 def _banner():
     """返回当前版本的装饰行列表（作为 menu header 传入）."""
-    return [banner_line(f"Issue Tracker v{__version__}")]
+    return banner_block(__version__)
 
 
 # ── 工具函数 ─────────────────────────────────────────────
