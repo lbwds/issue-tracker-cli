@@ -249,7 +249,22 @@ class Exporter:
 
     def _priority_section(self, priority: str, issues: list[Issue]) -> str:
         title = PRIORITY_SECTION_TITLES.get(priority, f"{priority} Priority")
-        lines = [f"## {title}", ""]
+
+        # 计算修复进度
+        total = len(issues)
+        fixed = sum(1 for i in issues if i.status == "fixed")
+        progress_pct = int(fixed / total * 100) if total > 0 else 0
+
+        # 生成标题（带进度显示）
+        if progress_pct == 100:
+            # 全部修复完成 - 庆祝标志
+            title_with_progress = f"## {title} - 🎉 100% 🎉"
+        else:
+            # 有待修复问题 - 显示进度条
+            progress_bar = self._generate_progress_bar(progress_pct)
+            title_with_progress = f"## {title} - {progress_bar} {progress_pct}%"
+
+        lines = [title_with_progress, ""]
 
         for issue in sorted(issues, key=lambda i: self._sort_key(i.id)):
             lines.append(self._format_issue(issue))
@@ -395,6 +410,21 @@ class Exporter:
         for issue in issues:
             groups.setdefault(issue.priority, []).append(issue)
         return groups
+
+    @staticmethod
+    def _generate_progress_bar(progress_pct: int, bar_length: int = 10) -> str:
+        """生成进度条字符串.
+
+        Args:
+            progress_pct: 完成百分比 (0-100)
+            bar_length: 进度条长度（方块数量）
+
+        Returns:
+            进度条字符串，如 "███░░░░░░░"
+        """
+        filled = int(progress_pct / 100 * bar_length)
+        empty = bar_length - filled
+        return "█" * filled + "░" * empty
 
     @staticmethod
     def _indent_content(content: str) -> str:
