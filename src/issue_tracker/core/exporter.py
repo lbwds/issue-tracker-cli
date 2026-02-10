@@ -352,17 +352,17 @@ class Exporter:
 
         if issue.description:
             lines.append("**问题描述**:")
-            lines.append(issue.description)
+            lines.append(self._indent_content(issue.description))
             lines.append("")
 
         if issue.impact:
             lines.append("**影响**:")
-            lines.append(issue.impact)
+            lines.append(self._indent_content(issue.impact))
             lines.append("")
 
         if issue.fix_plan:
             lines.append("**修复方案**:")
-            lines.append(issue.fix_plan)
+            lines.append(self._indent_content(issue.fix_plan))
             lines.append("")
 
         if issue.estimated_hours is not None:
@@ -395,6 +395,65 @@ class Exporter:
         for issue in issues:
             groups.setdefault(issue.priority, []).append(issue)
         return groups
+
+    @staticmethod
+    def _indent_content(content: str) -> str:
+        """自动识别代码块并确保其前后有空行,避免与文档结构冲突.
+
+        如果内容不包含代码块,则返回原内容;
+        如果包含代码块(```),则确保代码块前后有空行以正确渲染.
+
+        处理两种情况：
+        1. 代码块标记在独立行：```cpp
+        2. 代码块标记在文本后：【M-040】```cpp
+
+        Args:
+            content: 要处理的内容
+
+        Returns:
+            处理后的内容
+        """
+        if not content or "```" not in content:
+            return content
+
+        lines = content.split("\n")
+        result = []
+        in_code_block = False
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+
+            # 检测代码块标记（可能在行的任意位置）
+            if "```" in stripped:
+                if not in_code_block:
+                    # 代码块开始
+                    # 情况1: ```在行首或独立一行 - 确保前面有空行
+                    if stripped.startswith("```"):
+                        if result and result[-1].strip():
+                            result.append("")
+                        result.append(line)
+                    # 情况2: ```在文本后面（如【M-040】```cpp）- 需要拆分并添加空行
+                    else:
+                        before_code = stripped[:stripped.index("```")].rstrip()
+                        code_marker = stripped[stripped.index("```"):]
+                        # 添加前置文本
+                        if before_code:
+                            result.append(before_code)
+                        # 总是在代码块前添加空行
+                        result.append("")
+                        result.append(code_marker)
+                    in_code_block = True
+                else:
+                    # 代码块结束
+                    result.append(line)
+                    in_code_block = False
+                    # 确保后面有空行
+                    if i < len(lines) - 1 and lines[i + 1].strip():
+                        result.append("")
+            else:
+                result.append(line)
+
+        return "\n".join(result)
 
     @staticmethod
     def _sort_key(issue_id: str) -> int:
